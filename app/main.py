@@ -6,10 +6,13 @@ deduplicação de trechos, agendamento de 4 vídeos/dia para 7 dias e integraç�
 
 import os
 import json
+import uuid
+import asyncio
+import threading
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -23,6 +26,8 @@ from app.services.editor import VideoEditor
 from app.services.scheduler import PostScheduler
 from app.services.pipeline_worker import PipelineWorker
 from app.ai_bus.bus import AIBus
+
+BOOT_ID = str(uuid.uuid4())
 
 app = FastAPI(
     title="AI YouTube Shorts Clip Engine",
@@ -45,10 +50,18 @@ app.mount("/media/clips", StaticFiles(directory="./data/clips"), name="clips_med
 app.mount("/media/thumbnails", StaticFiles(directory="./data/thumbnails"), name="thumbnails_media")
 
 worker = PipelineWorker()
+_worker_thread: Optional[threading.Thread] = None
 
 @app.on_event("startup")
 def on_startup():
+    global _worker_thread
     init_db()
+    if _worker_thread is None or not _worker_thread.is_alive():
+        _worker_thread = threading.Thread(
+            target=lambda: worker.start_loop(interval_seconds=180),
+            daemon=True
+        )
+        _worker_thread.start()
 
 # ==========================================
 # STATUS & MISSION CONTROL
@@ -59,12 +72,13 @@ def get_system_status(db: Session = Depends(get_db)):
     channels_active = db.query(SourceChannel).filter(SourceChannel.is_active == True).count()
     videos_count = db.query(SourceVideo).count()
     clips_count = db.query(ClipSegment).count()
-    rendered_count = db.query(ClipSegment).filter(ClipSegment.status == "rendered").count()
+    rendered_count = db.query(ClipSegment).filter(ClipSegment.status.in_(["rendered", "scheduled", "published"])).count()
     scheduled_count = db.query(ScheduledPost).filter(ScheduledPost.status.in_(["pending", "scheduled_on_youtube"])).count()
     dest_count = db.query(DestinationChannel).count()
 
     return {
         "status": "online",
+        "boot_id": BOOT_ID,
         "monitored_channels": channels_active,
         "videos_tracked": videos_count,
         "clips_total": clips_count,
@@ -369,6 +383,29 @@ def get_ai_bus_events(db: Session = Depends(get_db)):
 def run_pipeline_cycle(background_tasks: BackgroundTasks):
     background_tasks.add_task(worker.run_one_cycle)
     return {"message": "Ciclo da esteira iniciado em segundo plano!"}
+
+@app.patch("/api/destination-channels/{channel_id}/toggle")
+def toggle_destination_channel(channel_id: int, db: Session = Depends(get_db)):
+    ch = db.query(DestinationChannel).filter(DestinationChannel.id == channel_id).first()
+    if not ch:
+        raise HTTPException(status_code=404, detail="Canal de destino não encontrado.")
+    ch.is_active = not bool(ch.is_active)
+    db.commit()
+    return {"id": ch.id, "is_active": ch.is_active}
+
+@app.get("/api/events/stream")
+async def stream_realtime_events():
+    async def event_generator():
+        while True:
+            try:
+                with SessionLocal() as db:
+                    status_data = get_system_status(db)
+                yield f"data: {json.dumps(status_data)}\n\n"
+            except Exception:
+                yield f"data: {json.dumps({'status': 'error', 'boot_id': BOOT_ID})}\n\n"
+            await asyncio.sleep(3)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 # ==========================================
 # WEB DASHBOARD (HTML MISSION CONTROL)

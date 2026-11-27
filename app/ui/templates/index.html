@@ -199,9 +199,14 @@
               Publicações automáticas em 4 horários de maior engajamento gamer: <strong>11:30</strong> (Almoço), <strong>15:00</strong> (Tarde), <strong>18:30</strong> (Volta do Trabalho/Escola) e <strong>21:00</strong> (Prime Time).
             </p>
           </div>
-          <button onclick="autoFillSchedule()" class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-bold text-slate-950 transition flex items-center gap-2 shadow-lg shadow-amber-500/20">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Preencher Grade Semanal
-          </button>
+          <div class="flex flex-wrap items-center gap-2.5">
+            <select id="calendarChannelSelect" onchange="loadCalendar()" class="bg-studio-950 border border-studio-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-amber-500">
+              <option value="">Canal Principal</option>
+            </select>
+            <button onclick="autoFillSchedule()" class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-bold text-slate-950 transition flex items-center gap-2 shadow-lg shadow-amber-500/20">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Preencher Grade Semanal
+            </button>
+          </div>
         </div>
         <div class="overflow-x-auto">
           <div id="calendarGrid" class="grid grid-cols-1 md:grid-cols-7 gap-3 min-w-[900px]">
@@ -376,10 +381,22 @@
 
     async function loadCalendar() {
       try {
-        const res = await fetch('/api/scheduler/matrix');
+        const sel = document.getElementById('calendarChannelSelect');
+        if (sel && sel.options.length <= 1) {
+          const chRes = await fetch('/api/destination-channels');
+          const destChannels = await chRes.json();
+          if (destChannels.length) {
+            sel.innerHTML = destChannels.map(ch => `<option value="${ch.id}">${ch.name} (${ch.weight ?? 0}%)</option>`).join('');
+          }
+        }
+        const selectedId = sel && sel.value ? `?channel_id=${sel.value}` : '';
+        const res = await fetch(`/api/scheduler/matrix${selectedId}`);
         const data = await res.json();
         const container = document.getElementById('calendarGrid');
-        if (!data.matrix) return;
+        if (!data.matrix) {
+          container.innerHTML = '<p class="text-xs text-slate-400 col-span-7 py-6 text-center">Nenhum canal de destino cadastrado ainda.</p>';
+          return;
+        }
 
         container.innerHTML = data.matrix.map(day => `
           <div class="bg-studio-950 border border-studio-800 rounded-xl p-3 space-y-2.5">
@@ -429,7 +446,7 @@
           return;
         }
         container.innerHTML = clips.map(c => `
-          <div class="bg-studio-950 border border-studio-800 rounded-2xl p-4 flex flex-col justify-between hover:border-studio-700 transition">
+          <div class="bg-studio-950 border border-studio-800 rounded-2xl p-4 flex flex-col justify-between hover:border-studio-700 transition gap-3">
             <div>
               <div class="flex justify-between items-start mb-2">
                 <span class="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
@@ -439,16 +456,52 @@
               </div>
               <h4 class="font-bold text-sm text-white line-clamp-2 mt-1">${c.title}</h4>
               <p class="text-xs text-slate-400 mt-1 line-clamp-2 italic">"${c.hook || 'Momento de alta retenção'}"</p>
+              ${c.media_url ? `
+                <div class="mt-3 rounded-xl overflow-hidden border border-studio-800 bg-black">
+                  <video controls preload="metadata" class="w-full max-h-64 object-contain" src="${c.media_url}"></video>
+                </div>
+              ` : ''}
             </div>
-            <div class="mt-4 pt-3 border-t border-studio-800 flex justify-between items-center text-xs">
+            <div class="pt-3 border-t border-studio-800 flex flex-wrap justify-between items-center gap-2 text-xs">
               <span class="text-slate-400">Por: <strong class="text-cyan-400">${c.suggested_by}</strong></span>
-              <span class="px-2 py-0.5 rounded font-mono text-[10px] uppercase font-bold ${
-                c.status === 'rendered' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-studio-800 text-slate-300'
-              }">${c.status}</span>
+              <div class="flex items-center gap-2">
+                ${c.status === 'analyzed' ? `
+                  <button onclick="renderClip(${c.id})" class="px-2.5 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-bold text-[11px] transition">
+                    Renderizar 9:16
+                  </button>
+                ` : ''}
+                ${c.media_url ? `
+                  <a href="${c.media_url}" download="short_${c.id}.mp4" class="px-2.5 py-1 rounded-lg bg-studio-800 hover:bg-studio-700 text-slate-200 font-semibold text-[11px] transition">
+                    Baixar MP4
+                  </a>
+                ` : ''}
+                <span class="px-2 py-0.5 rounded font-mono text-[10px] uppercase font-bold ${
+                  c.status === 'rendered' || c.status === 'scheduled' || c.status === 'published'
+                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                    : 'bg-studio-800 text-slate-300'
+                }">${c.status}</span>
+              </div>
             </div>
           </div>
         `).join('');
       } catch (e) { console.error(e); }
+    }
+
+    async function renderClip(clipId) {
+      showToast(`Renderizando clipe #${clipId} em 9:16...`, 'info');
+      try {
+        const res = await fetch(`/api/clips/${clipId}/render`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+          showToast(data.detail || `Erro ao renderizar clipe #${clipId}`, 'error');
+          return;
+        }
+        showToast(`Clipe #${clipId} renderizado com sucesso!`, 'success');
+        loadClips();
+        fetchStats();
+      } catch (e) {
+        showToast(`Erro de rede ao renderizar clipe #${clipId}`, 'error');
+      }
     }
 
     async function loadVideosForTimeline() {
@@ -597,7 +650,19 @@
       } catch (e) { console.error(e); }
     }
 
+    async function toggleDestination(channelId) {
+      try {
+        const res = await fetch(`/api/destination-channels/${channelId}/toggle`, { method: 'PATCH' });
+        if (res.ok) {
+          showToast('Status do canal atualizado!', 'success');
+          loadDestinations();
+        }
+      } catch (e) { console.error(e); }
+    }
+
+    let currentActiveTab = 'channels';
     function switchTab(tab) {
+      currentActiveTab = tab;
       ['channels', 'calendar', 'clips', 'timeline', 'aibus', 'destinations'].forEach(t => {
         const btn = document.getElementById('tabBtn' + t.charAt(0).toUpperCase() + t.slice(1));
         const content = document.getElementById('tabContent' + t.charAt(0).toUpperCase() + t.slice(1));
@@ -612,35 +677,100 @@
           content.classList.add('hidden');
         }
       });
-      if (tab === 'calendar') loadCalendar();
-      if (tab === 'clips') loadClips();
-      if (tab === 'timeline') loadVideosForTimeline();
-      if (tab === 'aibus') loadAIBusEvents();
-      if (tab === 'destinations') loadDestinations();
+      refreshActiveTab();
+    }
+
+    function refreshActiveTab() {
+      if (currentActiveTab === 'channels') loadChannels();
+      if (currentActiveTab === 'calendar') loadCalendar();
+      if (currentActiveTab === 'clips') loadClips();
+      if (currentActiveTab === 'timeline') loadVideosForTimeline();
+      if (currentActiveTab === 'aibus') loadAIBusEvents();
+      if (currentActiveTab === 'destinations') loadDestinations();
+    }
+
+    function showToast(message, type = 'info') {
+      let toast = document.getElementById('globalToast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'globalToast';
+        toast.className = 'fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl text-xs font-bold shadow-2xl border transition-all duration-300';
+        document.body.appendChild(toast);
+      }
+      const styles = {
+        info: 'bg-studio-900 border-cyan-500/40 text-cyan-300',
+        success: 'bg-studio-900 border-emerald-500/40 text-emerald-300',
+        error: 'bg-studio-900 border-rose-500/40 text-rose-300',
+      };
+      toast.className = `fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl text-xs font-bold shadow-2xl border transition-all duration-300 ${styles[type] || styles.info}`;
+      toast.textContent = message;
+      toast.style.opacity = '1';
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 4000);
     }
 
     async function triggerCheckChannels() {
-      await fetch('/api/channels/check-now', { method: 'POST' });
+      showToast('Verificando novos vídeos nos canais...', 'info');
+      const res = await fetch('/api/channels/check-now', { method: 'POST' });
+      const data = await res.json();
+      showToast(data.message || 'Canais verificados!', 'success');
       fetchStats();
       loadChannels();
     }
 
     async function triggerPipelineCycle() {
+      showToast('Esteira disparada em segundo plano! Acompanhe os números em tempo real.', 'info');
       await fetch('/api/pipeline/run-cycle', { method: 'POST' });
-      setTimeout(fetchStats, 3000);
+      setTimeout(() => { fetchStats(); refreshActiveTab(); }, 3000);
     }
 
     async function autoFillSchedule() {
       const res = await fetch('/api/scheduler/auto-fill', { method: 'POST' });
       const data = await res.json();
+      showToast(data.message || 'Grade atualizada!', 'success');
       loadCalendar();
       fetchStats();
+    }
+
+    // Conexão em tempo real (SSE) + Auto-reload automático quando houver git pull
+    let knownBootId = null;
+    let lastSnapshot = '';
+    function startRealtimeStream() {
+      const es = new EventSource('/api/events/stream');
+      es.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.boot_id) {
+            if (knownBootId && knownBootId !== data.boot_id) {
+              showToast('Nova atualização detectada! Recarregando painel...', 'info');
+              setTimeout(() => window.location.reload(), 600);
+              return;
+            }
+            knownBootId = data.boot_id;
+          }
+          if (data.status === 'online') {
+            document.getElementById('statChannels').textContent = data.monitored_channels;
+            document.getElementById('statVideos').textContent = data.videos_tracked;
+            document.getElementById('statClips').textContent = `${data.clips_rendered} / ${data.clips_total}`;
+            document.getElementById('statScheduled').textContent = data.scheduled_posts;
+            document.getElementById('statDestinations').textContent = data.destination_channels;
+            const snap = `${data.videos_tracked}-${data.clips_total}-${data.clips_rendered}-${data.scheduled_posts}-${data.destination_channels}`;
+            if (lastSnapshot && lastSnapshot !== snap) {
+              refreshActiveTab();
+            }
+            lastSnapshot = snap;
+          }
+        } catch (e) { console.error(e); }
+      };
+      es.onerror = () => {
+        // Quando o servidor reinicia após git pull, o EventSource reconecta automaticamente e detecta o novo boot_id
+      };
     }
 
     // Inicialização
     fetchStats();
     loadChannels();
-    setInterval(fetchStats, 10000);
+    startRealtimeStream();
   </script>
 </body>
 </html>
