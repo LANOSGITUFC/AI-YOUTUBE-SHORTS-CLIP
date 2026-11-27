@@ -26,11 +26,16 @@ const CROP_LABELS = {
   split_screen: 'Split-Screen',
   blur_bg: 'Blur 16:9',
   face_tracking: 'Center 9:16',
+  three: '3 Painéis',
+  four: 'Grid 2×2',
 };
 
 let currentView = 'clips';
 let currentClipFilter = 'all';
 let clipsCache = [];
+let opusPresetsCache = [];
+let brandKitsCache = [];
+let selectedPresetId = 'think-media';
 let knownBootId = null;
 let lastSnapshot = '';
 let toastTimer = null;
@@ -98,12 +103,15 @@ function refreshCurrentView() {
   else if (currentView === 'queue') loadVideosTable();
   else if (currentView === 'calendar') loadCalendar();
   else if (currentView === 'timeline') loadVideosForTimeline();
-  else if (currentView === 'presets') loadSettingsIntoUI();
-  else if (currentView === 'channels') loadChannels();
+  else if (currentView === 'presets') {
+    loadSettingsIntoUI();
+    loadOpusPresetsAndBrandKits();
+  } else if (currentView === 'channels') loadChannels();
   else if (currentView === 'destinations') loadDestinations();
   else if (currentView === 'settings') {
     loadSettingsIntoUI();
     loadAIBusEvents();
+    loadCookiesStatus();
   }
 }
 
@@ -300,6 +308,7 @@ function renderClipsGrid() {
 
   const filtered = clipsCache.filter((c) => {
     if (currentClipFilter === 'all') return true;
+    if (currentClipFilter === 'liked') return Boolean(c.liked);
     if (currentClipFilter === 'rendered') return c.is_ready;
     return c.status === currentClipFilter;
   });
@@ -308,7 +317,7 @@ function renderClipsGrid() {
     container.innerHTML = `
       <div class="empty-state" style="grid-column:1/-1;">
         <h3>Nenhum clipe encontrado neste filtro</h3>
-        <p>Cole uma URL do YouTube na barra superior ou clique em "Executar ciclo agora" para gerar 3 a 7 cortes inéditos automaticamente.</p>
+        <p>Cole uma URL do YouTube ou envie um MP4 na barra superior, ou clique em "Executar ciclo agora" para gerar 3 a 7 cortes inéditos.</p>
         <button class="btn btn-primary btn-sm" onclick="triggerPipelineCycle()">Executar ciclo agora</button>
       </div>
     `;
@@ -339,10 +348,18 @@ function renderClipsGrid() {
         <div class="clip-body">
           <div class="clip-meta-top">
             <span>${esc(c.channel_name)}</span>
-            ${statusBadge}
+            <div style="display:flex; align-items:center; gap:6px;">
+              ${statusBadge}
+              <button class="like-btn ${c.liked ? 'liked' : ''}" onclick="toggleLikeClip(${c.id})" title="${c.liked ? 'Remover dos favoritos' : 'Favoritar clipe'}" aria-label="Favoritar">${c.liked ? '♥' : '♡'}</button>
+            </div>
           </div>
           <h3 class="clip-title" title="${esc(c.title)}">${esc(c.title)}</h3>
           <p class="clip-hook">${esc(c.hook || c.video_title)}</p>
+          <div class="subscores-row">
+            <div class="subscore-cell"><span class="subscore-label">Hook</span><span class="subscore-val">${esc(c.hook_score ?? c.score)}</span></div>
+            <div class="subscore-cell"><span class="subscore-label">Ritmo</span><span class="subscore-val">${esc(c.pacing_score ?? c.score)}</span></div>
+            <div class="subscore-cell"><span class="subscore-label">História</span><span class="subscore-val">${esc(c.story_score ?? c.score)}</span></div>
+          </div>
           <div class="clip-specs">
             <span class="spec-chip">${fmtSec(c.start)} → ${fmtSec(c.end)}</span>
             <span class="spec-chip">${esc(c.duration)}s</span>
@@ -367,6 +384,25 @@ function renderClipsGrid() {
       </article>
     `;
   }).join('');
+}
+
+async function toggleLikeClip(clipId) {
+  const clip = clipsCache.find((c) => c.id === clipId);
+  if (!clip) return;
+  const nextLiked = !clip.liked;
+  try {
+    const res = await fetch(`/api/clips/${clipId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ liked: nextLiked }),
+    });
+    if (res.ok) {
+      clip.liked = nextLiked;
+      renderClipsGrid();
+    }
+  } catch (e) {
+    showToast('Erro ao favoritar clipe.', 'error');
+  }
 }
 
 async function renderClip(clipId) {
@@ -396,33 +432,90 @@ async function renderClip(clipId) {
 }
 
 async function openEditClipModal(clipId) {
+  if (!opusPresetsCache.length || !brandKitsCache.length) {
+    await loadOpusPresetsAndBrandKits();
+  }
   let clip = clipsCache.find((c) => c.id === clipId);
   if (!clip) {
-    // aberto a partir da agenda: o clipe pode não estar carregado na biblioteca
     try {
       const res = await fetch(`/api/clips/${clipId}`);
       if (res.ok) { clip = await res.json(); clipsCache.push(clip); }
     } catch (e) { /* ignora */ }
   }
   if (!clip) return;
+
+  const ed = clip.editor_config || {};
   document.getElementById('editClipId').value = clip.id;
-  setText('editClipModalTitle', `Editar clipe #${clip.id}`);
+  setText('editClipModalTitle', `Editar clipe #${clip.id} (OpusClip Studio)`);
   document.getElementById('editClipTitle').value = clip.title || '';
   document.getElementById('editClipHook').value = clip.hook || '';
+  document.getElementById('editClipHeadline').value = ed.headline_text || '';
   document.getElementById('editClipStart').value = clip.start;
   document.getElementById('editClipEnd').value = clip.end;
   document.getElementById('editClipCrop').value = clip.crop_mode || 'split_screen';
+
+  const presetSel = document.getElementById('editClipCaptionPreset');
+  if (presetSel) {
+    presetSel.innerHTML = '<option value="">Padrão do estúdio</option>' +
+      opusPresetsCache.map((p) => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.source)})</option>`).join('');
+    presetSel.value = ed.caption_preset || '';
+  }
+
+  const bkSel = document.getElementById('editClipBrandKit');
+  if (bkSel) {
+    bkSel.innerHTML = '<option value="">Padrão do estúdio</option>' +
+      brandKitsCache.map((k) => `<option value="${k.id}">${esc(k.name)}</option>`).join('');
+    bkSel.value = ed.brand_kit_id ? String(ed.brand_kit_id) : '';
+  }
+
+  document.getElementById('editClipMotion').value = ed.motion_type || 'none';
+  document.getElementById('editClipTransition').value = ed.transition_type || 'hard-cut';
+  document.getElementById('editClipProgressBar').checked = Boolean(ed.progress_bar);
+  document.getElementById('editClipRemoveSilences').checked = Boolean(ed.remove_silences);
+  document.getElementById('editClipAutoColor').checked = Boolean(ed.auto_color && ed.auto_color.enabled);
+  setText('editClipEmojisStatus', '');
+
   openModal('editClipModal');
+}
+
+async function generateAiEmojisForEditClip() {
+  const clipId = Number(document.getElementById('editClipId').value);
+  if (!clipId) return;
+  setText('editClipEmojisStatus', 'Gerando emojis...');
+  try {
+    const res = await fetch(`/api/clips/${clipId}/ai-emojis`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      setText('editClipEmojisStatus', data.detail || 'Erro');
+      return;
+    }
+    setText('editClipEmojisStatus', `${data.emojis_added} emojis injetados!`);
+    showToast(`${data.emojis_added} AI Emojis aplicados às legendas do clipe #${clipId}!`, 'success');
+  } catch (e) {
+    setText('editClipEmojisStatus', 'Erro de rede');
+  }
 }
 
 async function saveClipEdits(renderAfter) {
   const clipId = Number(document.getElementById('editClipId').value);
+  const bkVal = document.getElementById('editClipBrandKit')?.value || '';
+  const autoColorOn = Boolean(document.getElementById('editClipAutoColor')?.checked);
   const payload = {
     title: document.getElementById('editClipTitle').value.trim(),
     hook_text: document.getElementById('editClipHook').value.trim(),
     start_time: parseFloat(document.getElementById('editClipStart').value),
     end_time: parseFloat(document.getElementById('editClipEnd').value),
     crop_mode: document.getElementById('editClipCrop').value,
+    editor_config: {
+      headline_text: document.getElementById('editClipHeadline')?.value.trim() || '',
+      caption_preset: document.getElementById('editClipCaptionPreset')?.value || '',
+      brand_kit_id: bkVal ? Number(bkVal) : null,
+      motion_type: document.getElementById('editClipMotion')?.value || 'none',
+      transition_type: document.getElementById('editClipTransition')?.value || 'hard-cut',
+      progress_bar: Boolean(document.getElementById('editClipProgressBar')?.checked),
+      remove_silences: Boolean(document.getElementById('editClipRemoveSilences')?.checked),
+      auto_color: autoColorOn ? { enabled: true, sharpen: 0.5, denoise: 0.3, deblock: true, glow: false } : { enabled: false },
+    },
   };
   try {
     const res = await fetch(`/api/clips/${clipId}`, {
@@ -436,7 +529,7 @@ async function saveClipEdits(renderAfter) {
       return;
     }
     closeModal('editClipModal');
-    showToast('Alterações do clipe salvas.', 'success');
+    showToast('Alterações OpusClip do clipe salvas!', 'success');
     await loadClips();
     if (renderAfter) {
       await renderClip(clipId);
@@ -1601,4 +1694,237 @@ async function removeScheduledPostFromModal() {
   const postId = Number(document.getElementById('editPostId').value);
   closeModal('editPostModal');
   await removeScheduledPost(postId);
+}
+
+/* ==========================================
+   OPUSCLIP PRO: LOCAL MP4 UPLOAD, 14 PRESETS GALLERY, BRAND KITS & COOKIES
+   ========================================== */
+
+async function uploadLocalVideoFile(inputEl) {
+  const file = inputEl?.files?.[0];
+  if (!file) return;
+  const lbl = document.getElementById('btnUploadMp4Text');
+  if (lbl) lbl.textContent = 'Enviando...';
+  showToast(`Enviando '${file.name}' para transcrição e cortes...`, 'info');
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('auto_process', 'true');
+    const res = await fetch('/api/videos/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao enviar vídeo local.', 'error');
+      return;
+    }
+    showToast(data.message || 'Vídeo enviado com sucesso!', 'success');
+    fetchStatus();
+    switchView('queue');
+  } catch (e) {
+    showToast('Erro de rede ao enviar arquivo.', 'error');
+  } finally {
+    if (lbl) lbl.textContent = 'Enviar MP4';
+    if (inputEl) inputEl.value = '';
+  }
+}
+
+async function loadOpusPresetsAndBrandKits() {
+  try {
+    const [prRes, bkRes] = await Promise.all([
+      fetch('/api/caption-presets'),
+      fetch('/api/brand-kits'),
+    ]);
+    const prData = await prRes.json();
+    const bkData = await bkRes.json();
+    opusPresetsCache = prData.presets || [];
+    brandKitsCache = bkData.kits || [];
+    renderOpusPresetsGallery();
+    renderBrandKitsList();
+  } catch (e) {
+    console.error('Erro ao carregar presets/brand-kits:', e);
+  }
+}
+
+function renderOpusPresetsGallery() {
+  const el = document.getElementById('opusPresetsGallery');
+  if (!el || !opusPresetsCache.length) return;
+  el.innerHTML = opusPresetsCache.map((p) => {
+    const isActive = p.id === selectedPresetId;
+    const bgStyle = p.borderStyle === 3 ? `background:${esc(p.back)}; padding:2px 6px; border-radius:4px;` : '';
+    return `
+      <button type="button" class="preset-tile ${isActive ? 'active' : ''}" onclick="applyOpusPreset('${esc(p.id)}')">
+        <span class="preset-tile-sample" style="color:${esc(p.primary)}; ${bgStyle}">
+          ${p.upper ? 'OLHA' : 'Olha'} <span style="color:${esc(p.highlight)};">${p.upper ? 'ISSO' : 'isso'}</span>
+        </span>
+        <span class="preset-tile-meta">
+          <strong>${esc(p.name)}</strong>
+          <span>${esc(p.source)}</span>
+        </span>
+      </button>
+    `;
+  }).join('');
+}
+
+function applyOpusPreset(presetId) {
+  const p = opusPresetsCache.find((x) => x.id === presetId);
+  if (!p) return;
+  selectedPresetId = p.id;
+  setText('activePresetBadge', p.id);
+
+  if (document.getElementById('presetPrimaryColor')) document.getElementById('presetPrimaryColor').value = p.primary;
+  if (document.getElementById('presetHighlightColor')) document.getElementById('presetHighlightColor').value = p.highlight;
+  if (document.getElementById('presetOutlineColor')) document.getElementById('presetOutlineColor').value = p.outline;
+  if (document.getElementById('presetFontSize')) document.getElementById('presetFontSize').value = p.fontSize;
+  if (document.getElementById('presetWordsPerLine')) document.getElementById('presetWordsPerLine').value = String(p.wordsPerLine);
+  if (document.getElementById('presetUppercase')) document.getElementById('presetUppercase').checked = Boolean(p.upper);
+  if (document.getElementById('presetStyleMode')) {
+    document.getElementById('presetStyleMode').value = p.borderStyle === 3
+      ? 'box_caption'
+      : (p.pop ? 'karaoke_pop' : 'word_highlight');
+  }
+  renderOpusPresetsGallery();
+  updatePresetPreview();
+  showToast(`Template '${p.name}' aplicado ao preview. Clique em "Salvar preset do estúdio" para gravar.`, 'info');
+}
+
+function renderBrandKitsList() {
+  const el = document.getElementById('brandKitsList');
+  if (!el) return;
+  if (!brandKitsCache.length) {
+    el.innerHTML = '<div style="font-size:12px; color:var(--text-muted); grid-column:1/-1;">Nenhum Brand Kit salvo ainda.</div>';
+    return;
+  }
+  el.innerHTML = brandKitsCache.map((k) => `
+    <article class="channel-card">
+      <div class="channel-card-head">
+        <div>
+          <div style="font-weight:600; font-size:13.5px;">${esc(k.name)}</div>
+          <div class="input-mono" style="font-size:11px; color:var(--text-muted); margin-top:2px;">Preset: ${esc(k.default_preset)}</div>
+        </div>
+        <div style="display:flex; gap:4px; align-items:center;">
+          <span title="Cor base" style="width:14px; height:14px; border-radius:3px; border:1px solid var(--border-strong); background:${esc(k.primary_color)};"></span>
+          <span title="Cor destaque" style="width:14px; height:14px; border-radius:3px; border:1px solid var(--border-strong); background:${esc(k.highlight_color)};"></span>
+          <span title="Contorno" style="width:14px; height:14px; border-radius:3px; border:1px solid var(--border-strong); background:${esc(k.secondary_color)};"></span>
+        </div>
+      </div>
+      <div style="font-size:11.5px; color:var(--text-secondary);">
+        Marca d'água: <strong>${esc(k.watermark_text || 'Nenhuma')}</strong> (${esc(k.watermark_position)})
+      </div>
+      <div class="channel-card-foot">
+        <button class="btn btn-sm" onclick="applyBrandKitToStudio(${k.id})">Carregar no preview</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBrandKit(${k.id})">Excluir</button>
+      </div>
+    </article>
+  `).join('');
+}
+
+async function createBrandKitFromCurrent() {
+  const nameInput = document.getElementById('newBrandKitName');
+  const name = (nameInput?.value || '').trim();
+  if (!name) {
+    showToast('Digite um nome para o Brand Kit.', 'error');
+    return;
+  }
+  const payload = {
+    name,
+    primary_color: document.getElementById('presetPrimaryColor')?.value || '#FFFFFF',
+    highlight_color: document.getElementById('presetHighlightColor')?.value || '#04F827',
+    secondary_color: document.getElementById('presetOutlineColor')?.value || '#000000',
+    font_family: document.getElementById('presetFontName')?.value || 'auto',
+    default_preset: selectedPresetId || 'karaoke',
+    watermark_text: document.getElementById('presetWatermark')?.value.trim() || '',
+    watermark_position: 'top-right',
+    watermark_opacity: 0.75,
+  };
+  try {
+    const res = await fetch('/api/brand-kits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao criar Brand Kit.', 'error');
+      return;
+    }
+    if (nameInput) nameInput.value = '';
+    showToast(`Brand Kit '${data.name}' salvo!`, 'success');
+    loadOpusPresetsAndBrandKits();
+  } catch (e) {
+    showToast('Erro de rede ao salvar Brand Kit.', 'error');
+  }
+}
+
+function applyBrandKitToStudio(kitId) {
+  const k = brandKitsCache.find((x) => x.id === kitId);
+  if (!k) return;
+  if (k.default_preset) applyOpusPreset(k.default_preset);
+  if (document.getElementById('presetPrimaryColor')) document.getElementById('presetPrimaryColor').value = k.primary_color;
+  if (document.getElementById('presetHighlightColor')) document.getElementById('presetHighlightColor').value = k.highlight_color;
+  if (document.getElementById('presetOutlineColor')) document.getElementById('presetOutlineColor').value = k.secondary_color;
+  if (document.getElementById('presetWatermark')) document.getElementById('presetWatermark').value = k.watermark_text || '';
+  updatePresetPreview();
+  showToast(`Brand Kit '${k.name}' carregado no preview!`, 'success');
+}
+
+async function deleteBrandKit(kitId) {
+  if (!confirm('Excluir este Brand Kit?')) return;
+  try {
+    const res = await fetch(`/api/brand-kits/${kitId}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Brand Kit excluído.', 'success');
+      loadOpusPresetsAndBrandKits();
+    }
+  } catch (e) {
+    showToast('Erro ao excluir Brand Kit.', 'error');
+  }
+}
+
+async function loadCookiesStatus() {
+  try {
+    const res = await fetch('/api/settings/cookies');
+    const data = await res.json();
+    const badge = document.getElementById('cookiesStatusBadge');
+    if (badge) {
+      badge.textContent = data.has_cookies ? `Ativo (${Math.round(data.size_bytes / 1024)} KB)` : 'Não configurado';
+      badge.className = `badge ${data.has_cookies ? 'badge-ok' : ''}`;
+    }
+  } catch (e) { /* ignora */ }
+}
+
+async function saveCookiesTxt() {
+  const el = document.getElementById('cookiesTxtInput');
+  const txt = (el?.value || '').trim();
+  if (txt.length < 32) {
+    showToast('Cole o conteúdo completo do arquivo cookies.txt.', 'error');
+    return;
+  }
+  try {
+    const res = await fetch('/api/settings/cookies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookies_text: txt }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao salvar cookies.', 'error');
+      return;
+    }
+    if (el) el.value = '';
+    showToast(data.message || 'Cookies salvos!', 'success');
+    loadCookiesStatus();
+  } catch (e) {
+    showToast('Erro de rede ao salvar cookies.', 'error');
+  }
+}
+
+async function deleteCookiesTxt() {
+  try {
+    const res = await fetch('/api/settings/cookies', { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Cookies removidos.', 'success');
+      loadCookiesStatus();
+    }
+  } catch (e) {
+    showToast('Erro ao remover cookies.', 'error');
+  }
 }

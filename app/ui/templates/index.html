@@ -123,6 +123,10 @@
             aria-label="URL do vídeo do YouTube"
           >
           <button type="submit" class="btn btn-sm" id="btnQuickImport">Cortar URL</button>
+          <label class="btn btn-sm" id="btnUploadMp4Label" style="cursor:pointer;" title="Enviar arquivo MP4/MOV/MKV do seu PC">
+            <span id="btnUploadMp4Text">Enviar MP4</span>
+            <input id="quickUploadMp4" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,.mp4,.mov,.mkv,.webm" style="display:none;" onchange="uploadLocalVideoFile(this)">
+          </label>
         </form>
 
         <div class="topbar-actions">
@@ -165,10 +169,11 @@
           <div class="section-header">
             <div>
               <h2 class="section-title">Biblioteca de Cortes</h2>
-              <p class="section-desc">Revise cortes gerados, ajuste timestamps ou layout 9:16, renderize com legendas e exporte para Shorts, Reels ou TikTok.</p>
+              <p class="section-desc">Revise cortes gerados com sub-scores OpusClip (Hook, Ritmo, História), abra o Editor Visual de Layout ou personalize legendas/VFX.</p>
             </div>
             <div class="filter-pills">
               <button class="pill-btn active" data-clip-filter="all" onclick="setClipFilter('all', this)">Todos</button>
+              <button class="pill-btn" data-clip-filter="liked" onclick="setClipFilter('liked', this)">Favoritos</button>
               <button class="pill-btn" data-clip-filter="analyzed" onclick="setClipFilter('analyzed', this)">Aguardando render</button>
               <button class="pill-btn" data-clip-filter="rendered" onclick="setClipFilter('rendered', this)">Prontos (MP4)</button>
               <button class="pill-btn" data-clip-filter="scheduled" onclick="setClipFilter('scheduled', this)">Agendados</button>
@@ -309,6 +314,17 @@
             <button class="btn btn-primary btn-sm" onclick="saveStudioPreset()">Salvar preset do estúdio</button>
           </div>
 
+          <div class="panel" style="margin-bottom:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:8px; flex-wrap:wrap;">
+              <div>
+                <strong style="font-size:13px;">14 Templates de Legenda (OpusClip & 2Short.ai)</strong>
+                <div style="font-size:11.5px; color:var(--text-muted);">Clique em um template para aplicar cores, contorno e ritmo instantaneamente ao preview.</div>
+              </div>
+              <span class="badge" id="activePresetBadge">think-media</span>
+            </div>
+            <div id="opusPresetsGallery" class="presets-gallery"></div>
+          </div>
+
           <div class="preset-layout">
             <div class="panel" style="display:flex; flex-direction:column; gap:18px;">
               <div class="form-grid-2">
@@ -318,6 +334,8 @@
                     <option value="split_screen">Split-Screen Gamer (Facecam topo + Gameplay)</option>
                     <option value="blur_bg">16:9 Centralizado + Fundo Blur</option>
                     <option value="face_tracking">Tela Cheia 9:16 (Center Crop)</option>
+                    <option value="three">3 Painéis (Reação / Podcast)</option>
+                    <option value="four">Grid 2×2 (4 Câmeras / Squad)</option>
                   </select>
                 </div>
                 <div class="field">
@@ -343,10 +361,12 @@
                 <div class="field">
                   <label for="presetWordsPerLine">Palavras por bloco</label>
                   <select id="presetWordsPerLine" class="select" onchange="updatePresetPreview()">
+                    <option value="1">1 palavra (One Beat)</option>
                     <option value="2">2 palavras</option>
                     <option value="3" selected>3 palavras</option>
                     <option value="4">4 palavras</option>
                     <option value="5">5 palavras</option>
+                    <option value="6">6 palavras</option>
                   </select>
                 </div>
               </div>
@@ -412,6 +432,20 @@
                 O destaque alterna palavra por palavra sincronizado com a fala real.
               </span>
             </div>
+          </div>
+
+          <div class="panel" style="margin-top:20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+              <div>
+                <strong style="font-size:13.5px;">Brand Kits (Identidade Visual Reutilizável)</strong>
+                <div style="font-size:12px; color:var(--text-muted);">Salve o estilo atual acima como um Brand Kit para aplicar em 1 clique em qualquer clipe ou canal.</div>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <input id="newBrandKitName" type="text" class="input" style="width:210px; height:32px; padding:4px 10px;" placeholder="Nome do Brand Kit...">
+                <button class="btn btn-primary btn-sm" onclick="createBrandKitFromCurrent()">+ Salvar como Brand Kit</button>
+              </div>
+            </div>
+            <div id="brandKitsList" class="cards-grid-3"></div>
           </div>
         </section>
 
@@ -576,9 +610,21 @@
                 <input id="setAutoSchedule" type="checkbox" checked>
               </label>
 
+              <div style="border-top:1px solid var(--border-subtle); padding-top:12px; display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <strong style="font-size:12.5px;">YouTube Cookies (data/cookies.txt)</strong>
+                  <span class="badge" id="cookiesStatusBadge">Verificando...</span>
+                </div>
+                <textarea id="cookiesTxtInput" rows="3" class="textarea input-mono" placeholder="Cole aqui o conteúdo Netscape cookies.txt do YouTube (resolve erro 403 / verificação anti-bot)..."></textarea>
+                <div style="display:flex; gap:8px;">
+                  <button class="btn btn-sm" onclick="saveCookiesTxt()">Salvar cookies.txt</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteCookiesTxt()">Remover</button>
+                </div>
+              </div>
+
               <div style="border-top:1px solid var(--border-subtle); padding-top:12px;">
                 <strong style="font-size:12.5px; display:block; margin-bottom:8px;">Barramento Multi-IA (Antigravity ⇄ Claude Code)</strong>
-                <div id="aiBusLogs" class="log-terminal" style="max-height:180px;"></div>
+                <div id="aiBusLogs" class="log-terminal" style="max-height:160px;"></div>
               </div>
             </div>
           </div>
@@ -587,40 +633,99 @@
     </div>
   </div>
 
-  <!-- MODAL: EDITAR CLIPE -->
+  <!-- MODAL: EDITAR CLIPE (OPUSCLIP CONTROLS) -->
   <div class="modal-backdrop" id="editClipModal">
-    <div class="modal-card">
+    <div class="modal-card" style="max-width:640px;">
       <div class="modal-head">
         <h3 id="editClipModalTitle">Editar clipe</h3>
         <button class="btn btn-ghost btn-sm" onclick="closeModal('editClipModal')">Fechar</button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body" style="max-height:76vh; overflow-y:auto;">
         <input type="hidden" id="editClipId">
         <div class="field">
           <label for="editClipTitle">Título do Short</label>
           <input id="editClipTitle" type="text" class="input">
         </div>
-        <div class="field">
-          <label for="editClipHook">Frase de gancho (primeiros 3s)</label>
-          <input id="editClipHook" type="text" class="input">
-        </div>
         <div class="form-grid-2">
           <div class="field">
-            <label for="editClipStart">Início (segundos)</label>
+            <label for="editClipHook">Frase de gancho (primeiros 3s)</label>
+            <input id="editClipHook" type="text" class="input">
+          </div>
+          <div class="field">
+            <label for="editClipHeadline">Headline fixa no topo (opcional)</label>
+            <input id="editClipHeadline" type="text" class="input" placeholder="Ex: OLHA ESSA REAÇÃO">
+          </div>
+        </div>
+        <div class="form-grid-3">
+          <div class="field">
+            <label for="editClipStart">Início (seg)</label>
             <input id="editClipStart" type="number" step="0.5" min="0" class="input input-mono">
           </div>
           <div class="field">
-            <label for="editClipEnd">Fim (segundos — máx. 60s de duração)</label>
+            <label for="editClipEnd">Fim (seg, máx 60s)</label>
             <input id="editClipEnd" type="number" step="0.5" min="5" class="input input-mono">
           </div>
+          <div class="field">
+            <label for="editClipCrop">Layout 9:16</label>
+            <select id="editClipCrop" class="select">
+              <option value="split_screen">Split-Screen Gamer</option>
+              <option value="blur_bg">16:9 + Fundo Blur</option>
+              <option value="face_tracking">Tela Cheia 9:16</option>
+              <option value="three">3 Painéis</option>
+              <option value="four">Grid 2×2</option>
+            </select>
+          </div>
         </div>
-        <div class="field">
-          <label for="editClipCrop">Layout 9:16</label>
-          <select id="editClipCrop" class="select">
-            <option value="split_screen">Split-Screen Gamer (Facecam + Gameplay)</option>
-            <option value="blur_bg">16:9 Centralizado + Fundo Blur</option>
-            <option value="face_tracking">Tela Cheia 9:16 (Center Crop)</option>
-          </select>
+        <div class="form-grid-2">
+          <div class="field">
+            <label for="editClipCaptionPreset">Template de Legenda (OpusClip / 2Short)</label>
+            <select id="editClipCaptionPreset" class="select"></select>
+          </div>
+          <div class="field">
+            <label for="editClipBrandKit">Brand Kit (opcional)</label>
+            <select id="editClipBrandKit" class="select">
+              <option value="">Padrão do estúdio</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-grid-2">
+          <div class="field">
+            <label for="editClipMotion">Movimento de Câmera (Motion)</label>
+            <select id="editClipMotion" class="select">
+              <option value="none">Sem movimento</option>
+              <option value="punch-in">Punch-in (Zoom de impacto)</option>
+              <option value="slow-push">Slow-push (Zoom contínuo)</option>
+              <option value="auto-zoom">Auto-zoom dinâmico</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="editClipTransition">Transição de Entrada/Saída</label>
+            <select id="editClipTransition" class="select">
+              <option value="hard-cut">Corte seco (Hard cut)</option>
+              <option value="dip-to-black">Fade preto (Dip to black)</option>
+              <option value="white-flash">Flash branco (Impacto)</option>
+              <option value="defocus">Desfoque rápido (Defocus)</option>
+              <option value="signal-glitch">Glitch RGB</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-grid-3">
+          <label class="switch-row">
+            <span>Barra de progresso</span>
+            <input id="editClipProgressBar" type="checkbox">
+          </label>
+          <label class="switch-row">
+            <span>Cortar silêncios</span>
+            <input id="editClipRemoveSilences" type="checkbox">
+          </label>
+          <label class="switch-row">
+            <span>AutoColor HD</span>
+            <input id="editClipAutoColor" type="checkbox">
+          </label>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding-top:4px;">
+          <button type="button" class="btn btn-sm" onclick="generateAiEmojisForEditClip()">Injetar AI Emojis nas legendas</button>
+          <span id="editClipEmojisStatus" style="font-size:11.5px; color:var(--text-muted);"></span>
         </div>
       </div>
       <div class="modal-foot">

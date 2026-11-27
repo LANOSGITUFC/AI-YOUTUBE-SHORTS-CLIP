@@ -12,8 +12,9 @@ import asyncio
 import threading
 import subprocess
 import urllib.request
+import shutil
 from typing import Dict, Any, Optional
-from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
+from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse, FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -549,6 +550,76 @@ def import_video_by_url(payload: Dict[str, Any], background_tasks: BackgroundTas
         "video_id": video.id,
         "title": video.title,
         "message": "Vídeo importado! Download, transcrição e cortes iniciados em segundo plano." if auto_process else "Vídeo importado na fila.",
+    }
+
+
+@app.post("/api/videos/upload")
+async def upload_local_video(
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    auto_process: bool = Form(True),
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db),
+):
+    """Permite enviar um arquivo de vídeo local (MP4, MOV, MKV, WEBM) para transcrever e cortar sem depender do YouTube."""
+    filename = (file.filename or "upload.mp4").strip()
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in (".mp4", ".mov", ".mkv", ".webm", ".m4v"):
+        raise HTTPException(status_code=400, detail="Formato não suportado. Envie MP4, MOV, MKV ou WEBM.")
+
+    vid_id = f"up_{uuid.uuid4().hex[:10]}"
+    os.makedirs("./data/downloads", exist_ok=True)
+    dest_path = os.path.join("./data/downloads", f"{vid_id}{ext}")
+
+    with open(dest_path, "wb") as out_f:
+        shutil.copyfileobj(file.file, out_f)
+
+    if not os.path.exists(dest_path) or os.path.getsize(dest_path) < 4096:
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        raise HTTPException(status_code=400, detail="Arquivo de vídeo vazio ou inválido.")
+
+    downloader = VideoDownloader(db)
+    duration = downloader._get_video_duration(dest_path)
+    audio_path = os.path.join("./data/downloads", f"{vid_id}.wav")
+    downloader._extract_audio_wav(dest_path, audio_path)
+
+    target_ch = db.query(SourceChannel).filter(SourceChannel.channel_id == "custom_import").first()
+    if not target_ch:
+        target_ch = SourceChannel(
+            name="Importados / Uploads",
+            handle="@importados",
+            channel_id="custom_import",
+            url="https://www.youtube.com",
+            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=custom_import",
+            is_active=False,
+        )
+        db.add(target_ch)
+        db.flush()
+
+    clean_title = (title or os.path.splitext(filename)[0] or f"Upload {vid_id}").strip()[:490]
+    video = SourceVideo(
+        id=vid_id,
+        channel_id=target_ch.channel_id,
+        title=clean_title,
+        url=f"local://{vid_id}",
+        duration_seconds=float(duration or 0.0),
+        video_path=dest_path,
+        audio_path=audio_path if os.path.exists(audio_path) else None,
+        status="downloaded",
+    )
+    db.add(video)
+    db.commit()
+
+    if auto_process and background_tasks is not None:
+        background_tasks.add_task(worker.process_single_video, video.id, True)
+
+    return {
+        "success": True,
+        "video_id": video.id,
+        "title": video.title,
+        "duration": round(float(duration or 0.0), 1),
+        "message": "Vídeo enviado! Transcrição, detecção de cortes e renderização iniciados em segundo plano." if auto_process else "Vídeo salvo na fila.",
     }
 
 

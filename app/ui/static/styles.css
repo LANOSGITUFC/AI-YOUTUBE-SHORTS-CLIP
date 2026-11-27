@@ -1325,3 +1325,105 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   .quick-import-input { min-width: 0; }
   .calendar-grid { max-width: 100%; }
 }
+
+/* ==========================================
+   OPUSCLIP SUB-SCORES, PRESETS GALLERY & LIKES
+   ========================================== */
+
+.subscores-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.subscore-cell {
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.subscore-label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.subscore-val {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.like-btn {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+}
+
+.like-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.like-btn.liked {
+  color: var(--accent);
+  border-color: rgba(229, 72, 77, 0.45);
+  background: var(--accent-soft);
+}
+
+.presets-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.preset-tile {
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 9px 10px;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+
+.preset-tile:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-elevated);
+}
+
+.preset-tile.active {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.preset-tile-sample {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.preset-tile-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}

@@ -216,6 +216,29 @@ class TestV2Fixes(unittest.TestCase):
         self.assertTrue(patch_res.json()["clip"]["liked"])
         self.assertEqual(patch_res.json()["clip"]["editor_config"]["caption_preset"], "karaoke")
 
+    def test_07_local_mp4_upload_endpoint(self):
+        """Upload local rejeita extensões inválidas e aceita MP4 válido."""
+        bad = self.client.post(
+            "/api/videos/upload",
+            files={"file": ("malware.exe", b"0" * 5000, "application/octet-stream")},
+            data={"auto_process": "false"},
+        )
+        self.assertEqual(bad.status_code, 400)
+
+        good = self.client.post(
+            "/api/videos/upload",
+            files={"file": ("meu_clipe.mp4", b"\x00" * 8192, "video/mp4")},
+            data={"title": "Gravação Local OBS", "auto_process": "false"},
+        )
+        self.assertEqual(good.status_code, 200)
+        vid_id = good.json()["video_id"]
+        self.assertTrue(vid_id.startswith("up_"))
+        # Limpa arquivo temporário de teste
+        for ext in (".mp4", ".wav"):
+            p = f"./data/downloads/{vid_id}{ext}"
+            if os.path.exists(p):
+                os.remove(p)
+
 
 if __name__ == "__main__":
     unittest.main()
