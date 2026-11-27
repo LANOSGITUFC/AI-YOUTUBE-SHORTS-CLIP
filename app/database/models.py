@@ -129,7 +129,7 @@ class DestinationChannel(Base):
 
 class ScheduledPost(Base):
     """
-    4 videos/day x 7 days scheduling matrix
+    4 videos/day x 7 days scheduling matrix + 7-day A/B experiment tracking
     """
     __tablename__ = "scheduled_posts"
 
@@ -142,10 +142,41 @@ class ScheduledPost(Base):
     youtube_video_id = Column(String(50), nullable=True)
     youtube_url = Column(String(500), nullable=True)
     error_log = Column(Text, nullable=True)
+    experiment_id = Column(Integer, ForeignKey("channel_experiments.id"), nullable=True, index=True)
+    experiment_variant_json = Column(Text, nullable=True) # JSON: day_index, time_bucket, edit_style, seo_style, scene_mode, pacing_target
+    views_count = Column(Integer, default=0)
+    likes_count = Column(Integer, default=0)
+    comments_count = Column(Integer, default=0)
+    avg_retention_pct = Column(Float, default=0.0)
+    metrics_updated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=get_utc_now)
 
     clip = relationship("ClipSegment", back_populates="scheduled_posts")
     destination_channel = relationship("DestinationChannel", back_populates="scheduled_posts")
+    experiment = relationship("ChannelExperiment", back_populates="posts")
+
+
+class ChannelExperiment(Base):
+    """
+    1-Week Multi-Variant Testing Lab per Destination Channel:
+    Tests variations of posting times, editing styles, SEO angles, scene layouts, and pacing.
+    """
+    __tablename__ = "channel_experiments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    destination_channel_id = Column(Integer, ForeignKey("destination_channels.id"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    status = Column(String(40), default="active") # active, paused, completed
+    days = Column(Integer, default=7)
+    posts_per_day = Column(Integer, default=4)
+    start_date = Column(DateTime, default=get_utc_now)
+    end_date = Column(DateTime, nullable=True)
+    plan_json = Column(Text, nullable=True) # Full 7-day slot matrix with variant assignments
+    results_summary_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=get_utc_now)
+
+    destination_channel = relationship("DestinationChannel")
+    posts = relationship("ScheduledPost", back_populates="experiment")
 
 
 class AgentBusEvent(Base):

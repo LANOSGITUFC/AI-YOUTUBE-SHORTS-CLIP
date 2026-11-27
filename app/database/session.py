@@ -107,6 +107,21 @@ def init_db():
                 for col_name, col_def in migrations:
                     if col_name not in clip_cols:
                         conn.execute(text(f"ALTER TABLE clip_segments ADD COLUMN {col_name} {col_def}"))
+
+            post_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(scheduled_posts)")).fetchall()]
+            if post_cols:
+                post_migrations = [
+                    ("experiment_id", "INTEGER"),
+                    ("experiment_variant_json", "TEXT"),
+                    ("views_count", "INTEGER DEFAULT 0"),
+                    ("likes_count", "INTEGER DEFAULT 0"),
+                    ("comments_count", "INTEGER DEFAULT 0"),
+                    ("avg_retention_pct", "REAL DEFAULT 0.0"),
+                    ("metrics_updated_at", "DATETIME"),
+                ]
+                for col_name, col_def in post_migrations:
+                    if col_name not in post_cols:
+                        conn.execute(text(f"ALTER TABLE scheduled_posts ADD COLUMN {col_name} {col_def}"))
     
     with SessionLocal() as db:
         # Seed Default Brand Kits (OpusClip Style)

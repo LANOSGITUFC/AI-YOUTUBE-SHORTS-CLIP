@@ -4,6 +4,7 @@ const VIEW_TITLES = {
   clips: 'Clipes 9:16',
   queue: 'Fila & Esteira',
   calendar: 'Agenda Semanal (4/dia × 7 dias)',
+  experiments: 'Laboratório 7 Dias — Testes A/B por Canal',
   timeline: 'Inspetor de Deduplicação & Linha do Tempo',
   presets: 'Estilo de Legendas & Presets',
   channels: 'Canais Monitorados 24/7',
@@ -102,6 +103,7 @@ function refreshCurrentView() {
   if (currentView === 'clips') loadClips();
   else if (currentView === 'queue') loadVideosTable();
   else if (currentView === 'calendar') loadCalendar();
+  else if (currentView === 'experiments') loadExperimentsView();
   else if (currentView === 'timeline') loadVideosForTimeline();
   else if (currentView === 'presets') {
     loadSettingsIntoUI();
@@ -1964,5 +1966,268 @@ async function deleteCookiesTxt() {
     }
   } catch (e) {
     showToast('Erro ao remover cookies.', 'error');
+  }
+}
+
+/* ==========================================
+   LABORATÓRIO 7 DIAS (EXPERIMENTS LAB)
+   ========================================== */
+let activeExperimentId = null;
+
+async function loadExperimentsView() {
+  try {
+    const [destRes, expRes] = await Promise.all([
+      fetch('/api/destinations'),
+      fetch('/api/experiments'),
+    ]);
+    const dests = destRes.ok ? await destRes.json() : [];
+    const exps = expRes.ok ? await expRes.json() : [];
+
+    setText('navCountExperiments', exps.length);
+
+    const sel = document.getElementById('expTargetChannel');
+    if (sel) {
+      const prev = sel.value || 'all';
+      sel.innerHTML = `<option value="all">Todos os canais ativos (${dests.filter((d) => d.is_active).length})</option>` +
+        dests.map((d) => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
+      sel.value = prev;
+    }
+
+    const listEl = document.getElementById('experimentsCardsList');
+    if (!listEl) return;
+
+    if (!exps.length) {
+      listEl.innerHTML = `
+        <div class="empty-state" style="grid-column:1/-1;">
+          Nenhum experimento de 7 dias rodando ainda. Clique em <strong>Rodar semana de teste (7 dias)</strong> acima para criar a matriz completa de variações em cada canal.
+        </div>`;
+      const det = document.getElementById('experimentDetailWrap');
+      if (det) det.style.display = 'none';
+      return;
+    }
+
+    if (!activeExperimentId || !exps.some((e) => e.id === activeExperimentId)) {
+      activeExperimentId = exps[0].id;
+    }
+
+    listEl.innerHTML = exps.map((e) => `
+      <div class="exp-card ${e.id === activeExperimentId ? 'active' : ''}" onclick="openExperimentDetail(${e.id})">
+        <div class="exp-card-top">
+          <div>
+            <div class="exp-card-title">${esc(e.name)}</div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">${esc(e.channel_name)}</div>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <span class="badge ${e.status === 'active' ? 'badge-ok' : ''}">${e.status === 'active' ? 'Ativo' : 'Concluído'}</span>
+            <button class="btn btn-ghost btn-sm" style="padding:2px 6px;" title="Excluir experimento" onclick="event.stopPropagation(); deleteExperimentById(${e.id})">×</button>
+          </div>
+        </div>
+        <div class="exp-card-meta">
+          <span><strong>${e.filled_slots}/${e.total_slots}</strong> slots preenchidos</span>
+          <span><strong>${e.days}d</strong> × ${e.posts_per_day}/dia</span>
+          <span><strong>${e.total_views}</strong> views</span>
+        </div>
+      </div>
+    `).join('');
+
+    await openExperimentDetail(activeExperimentId);
+  } catch (err) {
+    showToast('Erro ao carregar Laboratório 7 Dias.', 'error');
+  }
+}
+
+async function launchWeeklyExperiment() {
+  const chVal = document.getElementById('expTargetChannel')?.value || 'all';
+  const postsPerDay = Number(document.getElementById('expPostsPerDay')?.value || 4);
+  const btn = document.getElementById('btnLaunchExperiment');
+  if (btn) { btn.disabled = true; btn.textContent = 'Gerando matriz...'; }
+  try {
+    const res = await fetch('/api/experiments/launch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        channel_id: chVal === 'all' ? 'all' : Number(chVal),
+        days: 7,
+        posts_per_day: postsPerDay,
+        auto_fill: true,
+        apply_variants: true,
+        include_analyzed: false,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao iniciar semana de teste.', 'error');
+      return;
+    }
+    const first = data.experiments?.[0];
+    if (first?.id) activeExperimentId = first.id;
+    showToast(`Semana de teste iniciada em ${data.count} canal(is)!`, 'success');
+    await loadExperimentsView();
+  } catch (e) {
+    showToast('Erro de rede ao lançar experimento.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Rodar semana de teste (7 dias)'; }
+  }
+}
+
+async function openExperimentDetail(expId) {
+  activeExperimentId = expId;
+  document.querySelectorAll('.exp-card').forEach((card) => {
+    card.classList.toggle('active', card.getAttribute('onclick')?.includes(`(${expId})`));
+  });
+  const wrap = document.getElementById('experimentDetailWrap');
+  if (!wrap) return;
+  try {
+    const res = await fetch(`/api/experiments/${expId}`);
+    if (!res.ok) return;
+    const report = await res.json();
+    wrap.style.display = 'block';
+
+    setText('expDetailTitle', `${report.name}`);
+    setText(
+      'expDetailSubtitle',
+      `${report.filled_slots}/${report.total_slots} slots com clipe • ${report.measured_posts} medidos • ${report.total_views} views totais • ${report.total_likes} likes`
+    );
+
+    const winnersEl = document.getElementById('expWinnersGrid');
+    const dims = [
+      { key: 'time_bucket', title: 'Melhor Horário' },
+      { key: 'edit_style', title: 'Melhor Edição' },
+      { key: 'seo_style', title: 'Melhor SEO' },
+      { key: 'scene_mode', title: 'Melhor Cena / Layout' },
+      { key: 'pacing_target', title: 'Melhor Duração' },
+    ];
+    if (winnersEl) {
+      winnersEl.innerHTML = dims.map((d) => {
+        const w = report.winners?.[d.key];
+        return `
+          <div class="exp-winner-card">
+            <div class="exp-winner-label">${d.title}</div>
+            <div class="exp-winner-val">${w ? esc(w.label) : 'Aguardando métricas'}</div>
+            <div class="exp-winner-sub">${w ? `Média ${w.avg_views} views • Ret. ${w.avg_retention_pct}% • Score ${w.avg_score}` : 'Sincronize YT ou lance views'}</div>
+          </div>`;
+      }).join('');
+    }
+
+    const matrixEl = document.getElementById('expMatrixGrid');
+    if (matrixEl) {
+      matrixEl.innerHTML = (report.days_matrix || []).map((day) => `
+        <div class="exp-day-col">
+          <div class="exp-day-head">
+            <strong>Dia ${day.day_index} — ${esc(day.day_name)}</strong>
+            <span class="badge">${esc(day.date)}</span>
+          </div>
+          ${day.slots.map((s) => `
+            <div class="exp-slot-card">
+              <div class="exp-slot-top">
+                <span class="exp-slot-time">${esc(s.time)} • ${esc(s.time_bucket_label.split(' ')[0])}</span>
+                <span class="badge ${s.post_id ? 'badge-ok' : ''}">${s.post_id ? esc(s.post_status) : 'Vago'}</span>
+              </div>
+              ${s.clip
+                ? `<div class="exp-slot-clip">${esc(s.clip.title)} <span style="color:var(--text-muted);">(${s.clip.duration}s)</span></div>`
+                : `<div class="exp-slot-empty">Aguardando próximo clipe renderizado (${esc(s.pacing_target_label)})</div>`}
+              <div class="exp-badges">
+                <span class="exp-badge" title="Estilo de Edição">Edição: ${esc(s.edit_style_label)}</span>
+                <span class="exp-badge" title="Ângulo de SEO">SEO: ${esc(s.seo_style_label)}</span>
+                <span class="exp-badge" title="Cena / Enquadramento">Cena: ${esc(s.scene_mode_label)}</span>
+                <span class="exp-badge" title="Duração alvo">${esc(s.pacing_target_label)}</span>
+              </div>
+              ${s.post_id ? `
+                <div class="exp-metrics-row">
+                  <span>👁 ${s.views_count} • 👍 ${s.likes_count} • 💬 ${s.comments_count} • ⏱ ${s.avg_retention_pct}%</span>
+                  <button class="btn btn-ghost btn-sm" style="padding:2px 6px; font-size:11px;" onclick="editExperimentPostMetrics(${s.post_id}, ${s.views_count}, ${s.likes_count}, ${s.comments_count}, ${s.avg_retention_pct})">Métricas</button>
+                </div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `).join('');
+    }
+  } catch (e) {
+    showToast('Erro ao abrir matriz do experimento.', 'error');
+  }
+}
+
+async function fillActiveExperimentSlots() {
+  if (!activeExperimentId) return;
+  try {
+    const res = await fetch(`/api/experiments/${activeExperimentId}/fill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apply_variants: true, include_analyzed: false }),
+    });
+    const data = await res.json();
+    showToast(`${data.newly_assigned || 0} novo(s) clipe(s) alocado(s) (${data.filled_slots}/${data.total_slots}).`, 'success');
+    await loadExperimentsView();
+  } catch (e) {
+    showToast('Erro ao preencher slots do experimento.', 'error');
+  }
+}
+
+async function syncActiveExperimentMetrics() {
+  if (!activeExperimentId) return;
+  try {
+    const res = await fetch(`/api/experiments/${activeExperimentId}/sync-metrics`, { method: 'POST' });
+    const data = await res.json();
+    showToast(data.message || 'Métricas sincronizadas.', 'success');
+    await openExperimentDetail(activeExperimentId);
+  } catch (e) {
+    showToast('Erro ao sincronizar métricas do YouTube.', 'error');
+  }
+}
+
+async function editExperimentPostMetrics(postId, curViews, curLikes, curComments, curRet) {
+  const raw = prompt(
+    'Informe as métricas separadas por vírgula: views, likes, comentarios, retencao%\nExemplo: 12500, 840, 42, 94.5',
+    `${curViews || 0}, ${curLikes || 0}, ${curComments || 0}, ${curRet || 0}`
+  );
+  if (raw === null) return;
+  const parts = raw.split(',').map((x) => Number(x.trim()) || 0);
+  try {
+    const res = await fetch(`/api/scheduled-posts/${postId}/metrics`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        views_count: parts[0] || 0,
+        likes_count: parts[1] || 0,
+        comments_count: parts[2] || 0,
+        avg_retention_pct: parts[3] || 0,
+      }),
+    });
+    if (res.ok) {
+      showToast('Métricas atualizadas! Ranking recalculado.', 'success');
+      await openExperimentDetail(activeExperimentId);
+    }
+  } catch (e) {
+    showToast('Erro ao salvar métricas.', 'error');
+  }
+}
+
+async function applyActiveExperimentWinner() {
+  if (!activeExperimentId) return;
+  try {
+    const res = await fetch(`/api/experiments/${activeExperimentId}/apply-winner`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao aplicar fórmula vencedora.', 'error');
+      return;
+    }
+    showToast(`Fórmula vencedora aplicada em ${data.channel_name}!`, 'success');
+    await loadExperimentsView();
+  } catch (e) {
+    showToast('Erro ao aplicar fórmula vencedora.', 'error');
+  }
+}
+
+async function deleteExperimentById(expId) {
+  if (!confirm('Remover este experimento da lista? Os vídeos já publicados não são apagados.')) return;
+  try {
+    const res = await fetch(`/api/experiments/${expId}`, { method: 'DELETE' });
+    if (res.ok) {
+      if (activeExperimentId === expId) activeExperimentId = null;
+      showToast('Experimento removido.', 'success');
+      await loadExperimentsView();
+    }
+  } catch (e) {
+    showToast('Erro ao remover experimento.', 'error');
   }
 }

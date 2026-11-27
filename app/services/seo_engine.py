@@ -149,17 +149,23 @@ class ViralSEOEngine:
         except Exception:
             return clip.hook_text or ""
 
-    def generate_for_clip(self, clip: ClipSegment, prefer_llm: bool = True) -> Dict[str, Any]:
+    def generate_for_clip(
+        self,
+        clip: ClipSegment,
+        prefer_llm: bool = True,
+        style_angle: Optional[str] = None,
+    ) -> Dict[str, Any]:
         raw_ch = clip.video.channel.name if (clip.video and clip.video.channel) else "Streamer"
         streamer = _clean_streamer_name(raw_ch)
         video_title = clip.video.title if clip.video else ""
         game = _detect_game_or_topic(video_title)
         category = (clip.category or "highlight").lower()
         transcript_excerpt = self._clip_transcript_excerpt(clip)
+        angle = (style_angle or "").strip().lower() or None
 
         result = None
         if prefer_llm:
-            result = self._try_llm_seo(streamer, video_title, game, category, transcript_excerpt)
+            result = self._try_llm_seo(streamer, video_title, game, category, transcript_excerpt, style_angle=angle)
 
         if not result:
             result = self._build_smart_ptbr_seo(
@@ -168,10 +174,14 @@ class ViralSEOEngine:
                 game=game,
                 category=category,
                 transcript_excerpt=transcript_excerpt,
-                seed=clip.id or int(clip.start_time or 1),
+                seed=(clip.id or int(clip.start_time or 1)) + (len(angle) * 17 if angle else 0),
+                style_angle=angle,
             )
 
-        return self._normalize_seo(result, streamer, game)
+        normalized = self._normalize_seo(result, streamer, game)
+        if angle:
+            normalized["style_angle"] = angle
+        return normalized
 
     def _try_llm_seo(
         self,
@@ -180,10 +190,20 @@ class ViralSEOEngine:
         game: str,
         category: str,
         transcript_excerpt: str,
+        style_angle: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         provider = self._get_setting("AI_PROVIDER", default="offline").lower()
         if provider == "offline":
             return None
+
+        angle_hints = {
+            "curiosidade": "Ângulo obrigatório: CURIOSIDADE / OPEN LOOP — crie tensão sem entregar o desfecho no título.",
+            "choque_reacao": "Ângulo obrigatório: REAÇÃO / CHOQUE DIRETO — foque na expressão ou reação extrema do streamer.",
+            "pergunta_debate": "Ângulo obrigatório: PERGUNTA / DEBATE — faça uma pergunta direta no título ou gancho que provoque comentários.",
+            "direto_curto": "Ângulo obrigatório: ULTRA-CURTO — título de no máximo 42 caracteres, seco, direto ao ponto e sem enfeites.",
+            "storytelling": "Ângulo obrigatório: STORYTELLING — abra como uma mini-história ('Tudo ia bem até...', 'Em 5 segundos...').",
+        }
+        angle_line = f"\n{angle_hints[style_angle]}" if style_angle in angle_hints else ""
 
         user_prompt = (
             f"Streamer: {streamer}\n"
@@ -191,6 +211,7 @@ class ViralSEOEngine:
             f"Título original do vídeo: {video_title}\n"
             f"Categoria do momento: {category}\n"
             f"Trecho falado no corte: {transcript_excerpt or '(sem transcrição — use o contexto do título)'}"
+            f"{angle_line}"
         )
 
         try:
@@ -305,9 +326,38 @@ class ViralSEOEngine:
         category: str,
         transcript_excerpt: str,
         seed: int = 1,
+        style_angle: Optional[str] = None,
     ) -> Dict[str, Any]:
         rng = random.Random(seed)
         in_game = f" no {game}" if (game and game != "React") else (" reagindo" if game == "React" else " na live")
+
+        angle_templates = {
+            "curiosidade": [
+                f"Espera até o final pra ver o que aconteceu com o {streamer}{in_game}",
+                f"Ninguém acreditou no que o {streamer} fez nesse segundo{in_game}",
+                f"Olha o detalhe que quase passou batido na live do {streamer}{in_game}",
+            ],
+            "choque_reacao": [
+                f"A reação do {streamer} ao vivo foi impagável{in_game} 😱",
+                f"{streamer} travou completamente com o que viu{in_game}",
+                f"O susto e a cara do {streamer} nesse momento{in_game} 😂",
+            ],
+            "pergunta_debate": [
+                f"Isso foi sorte ou pura habilidade do {streamer}{in_game}?",
+                f"Você teria reagido igual ao {streamer} nessa hora{in_game}?",
+                f"Quem errou nessa jogada do {streamer}{in_game}? Comenta!",
+            ],
+            "direto_curto": [
+                f"{streamer} quebrou tudo{in_game}",
+                f"Timing absurdo do {streamer}",
+                f"{streamer} não tankou isso 😂",
+            ],
+            "storytelling": [
+                f"Tudo ia bem até o {streamer} fazer isso{in_game} 💀",
+                f"O plano do {streamer} durou exatos 3 segundos{in_game}",
+                f"Em 10 segundos a live do {streamer} virou caos{in_game}",
+            ],
+        }
 
         templates = {
             "scare": [
@@ -340,8 +390,10 @@ class ViralSEOEngine:
                 f"Você precisa ver a reação do {streamer}{in_game}",
             ],
         }
-        pool = templates.get(category, templates["highlight"])
+        pool = angle_templates.get(style_angle or "") or templates.get(category, templates["highlight"])
         title = rng.choice(pool)
+        if style_angle == "direto_curto":
+            title = title[:42].strip()
 
         ctas = {
             "scare": "Você teria levado esse susto também? Comenta aí!",
@@ -351,13 +403,21 @@ class ViralSEOEngine:
             "fail": "Já aconteceu algo parecido na sua gameplay? Comenta aí!",
             "highlight": "O que você achou dessa reação? Deixa nos comentários!",
         }
+        angle_ctas = {
+            "curiosidade": "Você esperava esse final? Comenta o segundo que te pegou!",
+            "choque_reacao": "Qual nota você dá pra essa reação ao vivo?",
+            "pergunta_debate": "Responde sincero nos comentários — quero ver quem concorda!",
+            "direto_curto": "Curtiu o corte? Deixa o like e se inscreve!",
+            "storytelling": "Já aconteceu uma virada dessas na sua gameplay? Conta aí!",
+        }
 
         context_line = (
             f"Corte dos melhores momentos de {streamer}{in_game}."
             if game
             else f"Um dos melhores momentos recentes de {streamer}."
         )
-        description = f"{context_line} {ctas.get(category, ctas['highlight'])}\n\nCréditos: {streamer}"
+        chosen_cta = angle_ctas.get(style_angle or "") or ctas.get(category, ctas["highlight"])
+        description = f"{context_line} {chosen_cta}\n\nCréditos: {streamer}"
 
         streamer_low = streamer.lower()
         tags = [

@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.database.session import SessionLocal, init_db, get_db
 from app.database.models import (
-    SourceChannel, SourceVideo, ClipSegment, DestinationChannel, ScheduledPost, AgentBusEvent, SystemSetting, BrandKit
+    SourceChannel, SourceVideo, ClipSegment, DestinationChannel, ScheduledPost, ChannelExperiment, AgentBusEvent, SystemSetting, BrandKit
 )
 from app.services.monitor import ChannelMonitor
 from app.services.deduplicator import DeduplicationEngine
@@ -30,6 +30,7 @@ from app.services.downloader import VideoDownloader, extract_youtube_video_id, C
 from app.services.editor import VideoEditor
 from app.services.subtitles import OPUS_CAPTION_PRESETS
 from app.services.scheduler import PostScheduler
+from app.services.experiments import ChannelExperimentEngine, get_experiment_catalog
 from app.services.priority import ranked_channels
 from app.services.pipeline_worker import PipelineWorker
 from app.services.auth_youtube import YouTubeAuthManager, get_client_secrets_path
@@ -1678,6 +1679,176 @@ async def stream_realtime_events():
             await asyncio.sleep(2.5)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# ==========================================
+# LABORATÓRIO 7 DIAS (TESTES A/B POR CANAL)
+# ==========================================
+
+@app.get("/api/experiments/catalog")
+def get_experiments_catalog():
+    return get_experiment_catalog()
+
+
+@app.get("/api/experiments")
+def list_experiments(db: Session = Depends(get_db)):
+    exps = db.query(ChannelExperiment).order_by(ChannelExperiment.created_at.desc()).all()
+    out = []
+    for exp in exps:
+        try:
+            plan = json.loads(exp.plan_json) if exp.plan_json else []
+        except Exception:
+            plan = []
+        filled = sum(1 for s in plan if isinstance(s, dict) and s.get("post_id"))
+        try:
+            res = json.loads(exp.results_summary_json) if exp.results_summary_json else {}
+        except Exception:
+            res = {}
+        out.append({
+            "id": exp.id,
+            "name": exp.name,
+            "status": exp.status,
+            "destination_channel_id": exp.destination_channel_id,
+            "channel_name": exp.destination_channel.name if exp.destination_channel else f"Canal #{exp.destination_channel_id}",
+            "days": exp.days,
+            "posts_per_day": exp.posts_per_day,
+            "total_slots": len(plan),
+            "filled_slots": filled,
+            "total_views": int(res.get("total_views", 0) or 0),
+            "measured_posts": int(res.get("measured_posts", 0) or 0),
+            "start_date": exp.start_date.isoformat() if exp.start_date else None,
+            "end_date": exp.end_date.isoformat() if exp.end_date else None,
+        })
+    return out
+
+
+@app.post("/api/experiments/launch")
+def launch_weekly_experiment(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    """
+    Inicia 1 semana (7 dias) de testes com variações de horários, edição, SEO, cena e duração.
+    Se channel_id for omitido ou 'all', inicia em TODOS os canais de destino ativos.
+    """
+    engine = ChannelExperimentEngine(db)
+    days = int(payload.get("days", 7) or 7)
+    posts_per_day = int(payload.get("posts_per_day", 4) or 4)
+    auto_fill = bool(payload.get("auto_fill", True))
+    apply_variants = bool(payload.get("apply_variants", True))
+    include_analyzed = bool(payload.get("include_analyzed", False))
+    channel_id = payload.get("channel_id")
+
+    try:
+        if channel_id in (None, "", "all", 0):
+            created = engine.launch_for_all_channels(
+                days=days,
+                posts_per_day=posts_per_day,
+                auto_fill=auto_fill,
+                apply_variants=apply_variants,
+                include_analyzed=include_analyzed,
+            )
+            return {
+                "status": "launched",
+                "count": len(created),
+                "experiments": [engine.compute_report(e.id) for e in created],
+            }
+        else:
+            exp = engine.create_weekly_experiment(
+                channel_id=int(channel_id),
+                days=days,
+                posts_per_day=posts_per_day,
+                name=payload.get("name"),
+                auto_fill=auto_fill,
+                apply_variants=apply_variants,
+                include_analyzed=include_analyzed,
+            )
+            return {
+                "status": "launched",
+                "count": 1,
+                "experiments": [engine.compute_report(exp.id)],
+            }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/experiments/{exp_id}")
+def get_experiment_report(exp_id: int, db: Session = Depends(get_db)):
+    engine = ChannelExperimentEngine(db)
+    try:
+        return engine.compute_report(exp_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/api/experiments/{exp_id}/fill")
+def fill_experiment_slots(exp_id: int, payload: Optional[Dict[str, Any]] = None, db: Session = Depends(get_db)):
+    engine = ChannelExperimentEngine(db)
+    body = payload or {}
+    try:
+        res = engine.fill_open_slots(
+            exp_id,
+            apply_variants=bool(body.get("apply_variants", True)),
+            include_analyzed=bool(body.get("include_analyzed", False)),
+        )
+        return res
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/api/experiments/{exp_id}/sync-metrics")
+def sync_experiment_metrics(exp_id: int, db: Session = Depends(get_db)):
+    engine = ChannelExperimentEngine(db)
+    try:
+        res = engine.sync_youtube_metrics(exp_id)
+        res["report"] = engine.compute_report(exp_id)
+        return res
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/api/experiments/{exp_id}/apply-winner")
+def apply_experiment_winner(exp_id: int, db: Session = Depends(get_db)):
+    engine = ChannelExperimentEngine(db)
+    try:
+        return engine.apply_winning_formula(exp_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.delete("/api/experiments/{exp_id}")
+def delete_experiment(exp_id: int, db: Session = Depends(get_db)):
+    exp = db.query(ChannelExperiment).filter(ChannelExperiment.id == exp_id).first()
+    if not exp:
+        raise HTTPException(status_code=404, detail="Experimento não encontrado.")
+    # Desvincula posts sem apagar vídeos já publicados
+    db.query(ScheduledPost).filter(ScheduledPost.experiment_id == exp_id).update({ScheduledPost.experiment_id: None})
+    db.delete(exp)
+    db.commit()
+    return {"status": "deleted", "id": exp_id}
+
+
+@app.patch("/api/scheduled-posts/{post_id}/metrics")
+def update_scheduled_post_metrics(post_id: int, payload: Dict[str, Any], db: Session = Depends(get_db)):
+    import datetime as _dt
+    post = db.query(ScheduledPost).filter(ScheduledPost.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado.")
+    if "views_count" in payload:
+        post.views_count = max(0, int(payload.get("views_count") or 0))
+    if "likes_count" in payload:
+        post.likes_count = max(0, int(payload.get("likes_count") or 0))
+    if "comments_count" in payload:
+        post.comments_count = max(0, int(payload.get("comments_count") or 0))
+    if "avg_retention_pct" in payload:
+        post.avg_retention_pct = max(0.0, min(200.0, float(payload.get("avg_retention_pct") or 0.0)))
+    post.metrics_updated_at = _dt.datetime.now(_dt.timezone.utc)
+    db.commit()
+    return {
+        "status": "updated",
+        "post_id": post.id,
+        "views_count": post.views_count,
+        "likes_count": post.likes_count,
+        "comments_count": post.comments_count,
+        "avg_retention_pct": post.avg_retention_pct,
+    }
 
 
 # ==========================================

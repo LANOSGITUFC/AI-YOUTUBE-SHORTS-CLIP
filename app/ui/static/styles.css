@@ -1427,3 +1427,191 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   font-size: 10.5px;
   color: var(--text-muted);
 }
+
+/* ==========================================
+   LABORATÓRIO 7 DIAS (EXPERIMENTS LAB)
+   ========================================== */
+.exp-axes-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.exp-axis-pill {
+  background: var(--surface-1, #141418);
+  border: 1px solid var(--border, #26262e);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-muted, #a1a1aa);
+}
+
+.exp-axis-pill strong {
+  color: var(--text-main, #f4f4f5);
+}
+
+.exp-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.exp-card {
+  background: var(--surface-1, #141418);
+  border: 1px solid var(--border, #26262e);
+  border-radius: 12px;
+  padding: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.exp-card:hover,
+.exp-card.active {
+  border-color: var(--accent, #e11d48);
+  background: var(--surface-2, #1b1b22);
+}
+
+.exp-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.exp-card-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-main, #f4f4f5);
+}
+
+.exp-card-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-muted, #a1a1aa);
+  margin-top: 6px;
+}
+
+.exp-winners-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.exp-winner-card {
+  background: var(--surface-1, #141418);
+  border: 1px solid var(--border, #26262e);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.exp-winner-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #a1a1aa);
+  margin-bottom: 4px;
+}
+
+.exp-winner-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main, #f4f4f5);
+}
+
+.exp-winner-sub {
+  font-size: 11px;
+  color: var(--text-muted, #a1a1aa);
+  margin-top: 3px;
+}
+
+.exp-days-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 12px;
+}
+
+.exp-day-col {
+  background: var(--surface-1, #141418);
+  border: 1px solid var(--border, #26262e);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.exp-day-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border, #26262e);
+}
+
+.exp-slot-card {
+  background: var(--bg-canvas, #0d0d10);
+  border: 1px solid var(--border, #26262e);
+  border-radius: 9px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.exp-slot-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.exp-slot-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main, #f4f4f5);
+}
+
+.exp-slot-clip {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-main, #f4f4f5);
+  line-height: 1.35;
+}
+
+.exp-slot-empty {
+  font-size: 12px;
+  color: var(--text-muted, #71717a);
+  font-style: italic;
+}
+
+.exp-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.exp-badge {
+  font-size: 10.5px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: #1e1e26;
+  border: 1px solid #2e2e3a;
+  color: #d4d4d8;
+}
+
+.exp-metrics-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #26262e;
+  font-size: 11px;
+  color: var(--text-muted, #a1a1aa);
+}

@@ -49,6 +49,14 @@
           <span class="nav-count" id="navCountScheduled">0</span>
         </button>
 
+        <button class="nav-item" data-view="experiments" onclick="switchView('experiments')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6M10 3v6.5L5.2 18.6A2 2 0 0 0 7 21.5h10a2 2 0 0 0 1.8-2.9L14 9.5V3"/><path d="M8.5 14h7"/></svg>
+            Lab 7 Dias
+          </span>
+          <span class="nav-count" id="navCountExperiments">0</span>
+        </button>
+
         <button class="nav-item" data-view="timeline" onclick="switchView('timeline')">
           <span class="nav-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M7 6v12M17 6v12"/></svg>
@@ -262,6 +270,56 @@
           <div id="channelDropZone" class="channel-drop-zone">
             <span>Soltar em outro canal (mesmo horário):</span>
             <div id="channelDropChips" class="channel-drop-chips"></div>
+          </div>
+        </section>
+
+        <!-- VIEW 3B: LABORATÓRIO 7 DIAS (TESTES A/B POR CANAL) -->
+        <section id="view-experiments" class="view-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Laboratório 7 Dias — Testes A/B por Canal</h2>
+              <p class="section-desc">Roda 1 semana completa de variações controladas em cada canal: horários, estilos de edição, ângulos de SEO, cenas/layouts e duração dos cortes.</p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <select id="expTargetChannel" class="select" style="width:210px;">
+                <option value="all">Todos os canais ativos</option>
+              </select>
+              <select id="expPostsPerDay" class="select" style="width:130px;">
+                <option value="3">3 vídeos/dia</option>
+                <option value="4" selected>4 vídeos/dia</option>
+                <option value="6">6 vídeos/dia</option>
+              </select>
+              <button class="btn btn-primary btn-sm" id="btnLaunchExperiment" onclick="launchWeeklyExperiment()">
+                Rodar semana de teste (7 dias)
+              </button>
+            </div>
+          </div>
+
+          <div class="exp-axes-strip" id="expAxesStrip">
+            <div class="exp-axis-pill"><strong>Horários:</strong> Manhã, Almoço, Tarde, Prime, Noite e Madrugada</div>
+            <div class="exp-axis-pill"><strong>Edição:</strong> Karaokê, Hormozi, Beast, Minimal e Think Media</div>
+            <div class="exp-axis-pill"><strong>SEO:</strong> Curiosidade, Choque, Pergunta, Curto e Story</div>
+            <div class="exp-axis-pill"><strong>Cena:</strong> Split 31/69, Cam Flutuante, Face Track e Blur</div>
+            <div class="exp-axis-pill"><strong>Ritmo:</strong> 15-28s, 29-45s e 46-58s</div>
+          </div>
+
+          <div id="experimentsCardsList" class="exp-cards-grid"></div>
+
+          <div id="experimentDetailWrap" style="display:none; margin-top:20px;">
+            <div class="section-header" style="margin-bottom:12px;">
+              <div>
+                <h3 class="section-title" id="expDetailTitle">Matriz de 7 Dias</h3>
+                <p class="section-desc" id="expDetailSubtitle"></p>
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-sm" onclick="fillActiveExperimentSlots()">Preencher slots vagos</button>
+                <button class="btn btn-secondary btn-sm" onclick="syncActiveExperimentMetrics()">Sincronizar métricas YT</button>
+                <button class="btn btn-primary btn-sm" onclick="applyActiveExperimentWinner()">Aplicar fórmula vencedora</button>
+              </div>
+            </div>
+
+            <div id="expWinnersGrid" class="exp-winners-grid"></div>
+            <div id="expMatrixGrid" class="exp-days-grid"></div>
           </div>
         </section>
 
