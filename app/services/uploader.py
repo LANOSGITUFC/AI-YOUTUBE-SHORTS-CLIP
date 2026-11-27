@@ -37,6 +37,12 @@ class YouTubeUploader:
             f"{' '.join(['#' + t.replace('#', '') for t in tags])}"
         )
 
+        # Se o prazo já passou e ainda não foi postado, realoca para o próximo slot futuro
+        if post.scheduled_for <= datetime.datetime.now() and not post.youtube_video_id:
+            from app.services.scheduler import PostScheduler
+            PostScheduler(self.db).reallocate_overdue_posts()
+            self.db.refresh(post)
+
         publish_at_rfc3339 = post.scheduled_for.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         # Verifica se há credenciais OAuth reais conectadas

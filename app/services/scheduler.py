@@ -138,6 +138,44 @@ class PostScheduler:
 
         return scheduled_count
 
+    def reallocate_overdue_posts(self) -> int:
+        """
+        Verifica posts agendados cuja data/hora (scheduled_for) já passou
+        e que ainda NÃO foram postados (status 'pending' ou 'failed', sem youtube_video_id).
+        Realoca cada um para o próximo slot futuro disponível no mesmo canal.
+        """
+        now = datetime.datetime.now()
+        overdue_posts = (
+            self.db.query(ScheduledPost)
+            .filter(ScheduledPost.scheduled_for < now)
+            .filter(ScheduledPost.status.in_(["pending", "failed"]))
+            .filter(ScheduledPost.youtube_video_id.is_(None))
+            .order_by(ScheduledPost.scheduled_for.asc())
+            .all()
+        )
+
+        reallocated_count = 0
+        for post in overdue_posts:
+            empty_slots = self.get_upcoming_empty_slots(post.destination_channel_id, days_ahead=14)
+            if empty_slots:
+                target_dt = empty_slots[0]
+            else:
+                target_dt = now + datetime.timedelta(days=15)
+
+            post.scheduled_for = target_dt
+            post.status = "pending"
+            post.error_log = None
+            if post.clip:
+                post.clip.status = "scheduled"
+            # Flush imediatamente para que o próximo post da fila não pegue o mesmo slot
+            self.db.flush()
+            reallocated_count += 1
+
+        if reallocated_count > 0:
+            self.db.commit()
+
+        return reallocated_count
+
     def get_calendar_matrix(self, channel_id: int, days: int = 7) -> Dict[str, Any]:
         """
         Retorna a matriz completa do calendário dos próximos 7 dias com 4 vídeos/dia

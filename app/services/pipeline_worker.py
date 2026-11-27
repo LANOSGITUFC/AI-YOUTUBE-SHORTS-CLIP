@@ -82,15 +82,22 @@ class PipelineWorker:
                 except Exception as e:
                     logger.error(f"Erro ao renderizar clipe #{pending_clip.id}: {traceback.format_exc()}")
 
-            # 4. Agendar clipes renderizados na matriz de 4 vídeos/dia
+            # 4. Realocar posts vencidos não publicados e agendar clipes renderizados
             try:
+                reallocated_count = scheduler.reallocate_overdue_posts()
+                results["posts_reallocated"] = reallocated_count
                 sched_count = scheduler.auto_schedule_all_rendered()
                 results["posts_scheduled"] += sched_count
             except Exception as e:
                 logger.error(f"Erro no agendador: {e}")
 
-            # 5. Processar uploads agendados pendentes
-            pending_post = db.query(ScheduledPost).filter(ScheduledPost.status == "pending").first()
+            # 5. Processar uploads agendados pendentes (do mais próximo ao mais distante)
+            pending_post = (
+                db.query(ScheduledPost)
+                .filter(ScheduledPost.status == "pending")
+                .order_by(ScheduledPost.scheduled_for.asc())
+                .first()
+            )
             if pending_post:
                 try:
                     uploader.upload_scheduled_post(pending_post.id)
