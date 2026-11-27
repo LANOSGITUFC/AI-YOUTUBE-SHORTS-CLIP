@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+venv/
+env/
+.venv/
+
+# Data & Large Media
+data/downloads/*
+!data/downloads/.gitkeep
+data/clips/*
+!data/clips/.gitkeep
+data/transcripts/*
+!data/transcripts/.gitkeep
+data/thumbnails/*
+!data/thumbnails/.gitkeep
+*.db
+*.sqlite3
+
+# Node / Claude logs
+node_modules/
+.npm/
+.claude/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db

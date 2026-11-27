@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Shorts Clipper - Mission Control 24/7</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 500: '#ef4444', 600: '#dc2626' },
+            dark: { 800: '#18181b', 900: '#09090b', 700: '#27272a' }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-dark-900 text-slate-100 min-h-screen font-sans flex flex-col">
+
+  <!-- TOPBAR -->
+  <header class="border-b border-dark-700 bg-dark-800/80 backdrop-blur sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-red-600 to-purple-600 flex items-center justify-center shadow-lg shadow-red-500/20">
+        <i class="fa-solid fa-scissors text-white text-lg"></i>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold tracking-tight flex items-center gap-2">
+          AI YouTube Shorts Clipper
+          <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 24/7 Online
+          </span>
+        </h1>
+        <p class="text-xs text-slate-400">Monitoramento • Deduplicação de Trechos • Multi-IA (Claude Code & Antigravity) • 4 Vídeos/Dia</p>
+      </div>
+    </div>
+
+    <div class="flex items-center space-x-3">
+      <button onclick="triggerCheckChannels()" class="px-3.5 py-2 rounded-lg bg-dark-700 hover:bg-dark-600 text-xs font-semibold border border-slate-700 transition flex items-center gap-2">
+        <i class="fa-solid fa-arrows-rotate"></i> Varrer 9 Canais
+      </button>
+      <button onclick="triggerPipelineCycle()" class="px-3.5 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-xs font-semibold shadow-lg shadow-red-600/30 transition flex items-center gap-2">
+        <i class="fa-solid fa-play"></i> Executar Ciclo da Esteira
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <main class="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
+
+    <!-- KPI STATS -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4" id="statsGrid">
+      <div class="bg-dark-800 border border-dark-700 p-4 rounded-xl shadow-sm">
+        <span class="text-xs text-slate-400 font-medium">Canais Monitorados</span>
+        <div class="text-2xl font-bold text-white mt-1" id="kpiChannels">9</div>
+        <span class="text-[11px] text-emerald-400">Alanzoka, Paulinho, Lipao...</span>
+      </div>
+      <div class="bg-dark-800 border border-dark-700 p-4 rounded-xl shadow-sm">
+        <span class="text-xs text-slate-400 font-medium">Vídeos Rastreados</span>
+        <div class="text-2xl font-bold text-white mt-1" id="kpiVideos">0</div>
+        <span class="text-[11px] text-slate-400">via RSS 24/7 sem cota</span>
+      </div>
+      <div class="bg-dark-800 border border-dark-700 p-4 rounded-xl shadow-sm">
+        <span class="text-xs text-slate-400 font-medium">Clipes Registrados</span>
+        <div class="text-2xl font-bold text-white mt-1" id="kpiClips">0</div>
+        <span class="text-[11px] text-indigo-400">Deduplicação Ativa</span>
+      </div>
+      <div class="bg-dark-800 border border-dark-700 p-4 rounded-xl shadow-sm">
+        <span class="text-xs text-slate-400 font-medium">Clipes Renderizados 9:16</span>
+        <div class="text-2xl font-bold text-white mt-1" id="kpiRendered">0</div>
+        <span class="text-[11px] text-purple-400">Com legendas dinâmicas</span>
+      </div>
+      <div class="bg-dark-800 border border-dark-700 p-4 rounded-xl shadow-sm">
+        <span class="text-xs text-slate-400 font-medium">Grade Agendada (4/dia)</span>
+        <div class="text-2xl font-bold text-white mt-1" id="kpiScheduled">0</div>
+        <span class="text-[11px] text-amber-400">Próximos 7 dias</span>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div class="border-b border-dark-700 flex space-x-6">
+      <button onclick="switchTab('channels')" id="tabBtnChannels" class="pb-3 text-sm font-semibold border-b-2 border-red-500 text-white flex items-center gap-2">
+        <i class="fa-brands fa-youtube text-red-500"></i> 9 Canais Monitorados
+      </button>
+      <button onclick="switchTab('calendar')" id="tabBtnCalendar" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2">
+        <i class="fa-regular fa-calendar-days text-amber-500"></i> Grade de 4 Vídeos/Dia (7 Dias)
+      </button>
+      <button onclick="switchTab('clips')" id="tabBtnClips" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2">
+        <i class="fa-solid fa-film text-purple-500"></i> Clipes & Deduplicação
+      </button>
+      <button onclick="switchTab('aibus')" id="tabBtnAibus" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2">
+        <i class="fa-solid fa-robot text-cyan-400"></i> Multi-IA Bus (Claude Code Bridge)
+      </button>
+    </div>
+
+    <!-- SECTION: CANAIS -->
+    <div id="tabContentChannels" class="space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="channelsList">
+        <!-- Renderizado dinamicamente via JS -->
+      </div>
+    </div>
+
+    <!-- SECTION: CALENDAR 4 VÍDEOS/DIA X 7 DIAS -->
+    <div id="tabContentCalendar" class="space-y-4 hidden">
+      <div class="bg-dark-800 border border-dark-700 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-calendar-check text-amber-400"></i> Matriz Semanal de Agendamento (28 Slots)
+            </h2>
+            <p class="text-xs text-slate-400">4 publicações diárias automáticas em horários de pico (11:30, 15:00, 18:30, 21:00 BRT)</p>
+          </div>
+          <button onclick="autoFillSchedule()" class="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-xs font-semibold text-white">
+            Auto-Preencher Vagas com Clipes Renderizados
+          </button>
+        </div>
+        <div class="overflow-x-auto">
+          <div id="calendarGrid" class="grid grid-cols-1 md:grid-cols-7 gap-3 min-w-[700px]">
+            <!-- Renderizado dinamicamente via JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION: CLIPS & DEDUPLICAÇÃO -->
+    <div id="tabContentClips" class="space-y-4 hidden">
+      <div class="bg-dark-800 border border-dark-700 rounded-xl p-5">
+        <h2 class="text-base font-bold text-white mb-2 flex items-center gap-2">
+          <i class="fa-solid fa-shield-halved text-emerald-400"></i> Memória de Cortes & Proteção Anti-Duplicidade
+        </h2>
+        <p class="text-xs text-slate-400 mb-4">
+          O sistema memoriza os segundos exatos de cada corte. Se Claude Code, Open Code ou o analisador tentar cortar um trecho já utilizado, o banco rejeita com bloqueio imediato.
+        </p>
+        <div id="clipsGrid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- Renderizado via JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION: MULTI-IA BUS -->
+    <div id="tabContentAibus" class="space-y-4 hidden">
+      <div class="bg-dark-800 border border-dark-700 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-network-wired text-cyan-400"></i> Barramento de Comunicação Multi-IA
+            </h2>
+            <p class="text-xs text-slate-400">Histórico de eventos, tarefas e decisões trocadas entre Antigravity, Claude Code e Open Code</p>
+          </div>
+          <span class="text-xs px-2.5 py-1 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">MCP Server Ativo</span>
+        </div>
+        <div class="bg-dark-900 border border-dark-700 rounded-lg p-3 font-mono text-xs max-h-96 overflow-y-auto space-y-2" id="aiBusLogs">
+          <!-- Renderizado via JS -->
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    async function fetchStats() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        document.getElementById('kpiChannels').innerText = data.monitored_channels;
+        document.getElementById('kpiVideos').innerText = data.videos_tracked;
+        document.getElementById('kpiClips').innerText = data.clips_total;
+        document.getElementById('kpiRendered').innerText = data.clips_rendered;
+        document.getElementById('kpiScheduled').innerText = data.scheduled_posts;
+      } catch (e) { console.error(e); }
+    }
+
+    async function loadChannels() {
+      try {
+        const res = await fetch('/api/channels');
+        const channels = await res.json();
+        const container = document.getElementById('channelsList');
+        container.innerHTML = channels.map(c => `
+          <div class="bg-dark-800 border border-dark-700 rounded-xl p-4 flex flex-col justify-between hover:border-slate-600 transition">
+            <div class="flex items-start justify-between">
+              <div>
+                <h3 class="font-bold text-sm text-white">${c.name}</h3>
+                <span class="text-xs text-red-400 font-mono">${c.handle}</span>
+              </div>
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400" title="Canal Ativo"></span>
+            </div>
+            <div class="mt-4 pt-3 border-t border-dark-700/60 flex items-center justify-between text-xs text-slate-400">
+              <span>${c.video_count} vídeos rastreados</span>
+              <a href="${c.url}" target="_blank" class="text-red-400 hover:text-red-300">
+                <i class="fa-brands fa-youtube"></i> Abrir Canal
+              </a>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) { console.error(e); }
+    }
+
+    async function loadCalendar() {
+      try {
+        const res = await fetch('/api/scheduler/matrix');
+        const data = await res.json();
+        const container = document.getElementById('calendarGrid');
+        if (!data.matrix) return;
+
+        container.innerHTML = data.matrix.map(day => `
+          <div class="bg-dark-900 border border-dark-700 rounded-lg p-3 space-y-2">
+            <div class="text-center border-b border-dark-700 pb-2">
+              <span class="text-xs font-bold text-slate-200 block">${day.date}</span>
+              <span class="text-[10px] text-slate-400 uppercase">${day.day_name}</span>
+            </div>
+            <div class="space-y-2">
+              ${day.slots.map(s => `
+                <div class="p-2 rounded border text-xs ${s.is_filled ? 'bg-amber-500/10 border-amber-500/40 text-amber-200' : 'bg-dark-800 border-dark-700 text-slate-500'}">
+                  <div class="flex justify-between items-center font-bold">
+                    <span>${s.time}</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded ${s.is_filled ? 'bg-amber-500/20 text-amber-300' : 'bg-dark-700 text-slate-400'}">
+                      ${s.is_filled ? 'AGENDADO' : 'VAGO'}
+                    </span>
+                  </div>
+                  ${s.is_filled ? `<p class="text-[11px] font-medium text-slate-200 mt-1 truncate" title="${s.clip.title}">${s.clip.title}</p>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `).join('');
+      } catch (e) { console.error(e); }
+    }
+
+    async function loadClips() {
+      try {
+        const res = await fetch('/api/clips');
+        const clips = await res.json();
+        const container = document.getElementById('clipsGrid');
+        if (!clips.length) {
+          container.innerHTML = '<p class="text-xs text-slate-400 col-span-3">Nenhum clipe gerado ainda. Clique em "Executar Ciclo da Esteira" ou envie tarefas pelo Claude Code.</p>';
+          return;
+        }
+        container.innerHTML = clips.map(c => `
+          <div class="bg-dark-900 border border-dark-700 rounded-xl p-3 flex flex-col justify-between">
+            <div>
+              <div class="flex justify-between items-start mb-2">
+                <span class="text-xs font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  Viral Score: ${c.score}
+                </span>
+                <span class="text-[11px] text-slate-400 font-mono">${c.start}s - ${c.end}s (${c.duration}s)</span>
+              </div>
+              <h4 class="font-bold text-sm text-white line-clamp-2">${c.title}</h4>
+              <p class="text-xs text-slate-400 mt-1 line-clamp-2">${c.hook || 'Sem gancho'}</p>
+            </div>
+            <div class="mt-3 pt-2 border-t border-dark-700 flex justify-between items-center text-xs">
+              <span class="text-slate-400">Por: <strong class="text-cyan-400">${c.suggested_by}</strong></span>
+              <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] uppercase">${c.status}</span>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) { console.error(e); }
+    }
+
+    async function loadAIBusEvents() {
+      try {
+        const res = await fetch('/api/ai-bus/events');
+        const events = await res.json();
+        const container = document.getElementById('aiBusLogs');
+        if (!events.length) {
+          container.innerHTML = '<span class="text-slate-500">// Aguardando primeiros eventos do barramento...</span>';
+          return;
+        }
+        container.innerHTML = events.map(e => `
+          <div class="p-2 border-b border-dark-800 flex items-start gap-2">
+            <span class="text-cyan-400">[${e.sender} &rarr; ${e.target}]</span>
+            <span class="text-amber-400 font-bold">${e.type}</span>
+            <span class="text-slate-300 flex-1 truncate">${JSON.stringify(e.payload)}</span>
+            <span class="text-slate-500 text-[10px]">${e.created_at.split('T')[1].slice(0, 8)}</span>
+          </div>
+        `).join('');
+      } catch (e) { console.error(e); }
+    }
+
+    function switchTab(tab) {
+      ['channels', 'calendar', 'clips', 'aibus'].forEach(t => {
+        const btn = document.getElementById('tabBtn' + t.charAt(0).toUpperCase() + t.slice(1));
+        const content = document.getElementById('tabContent' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (t === tab) {
+          btn.classList.add('border-red-500', 'text-white');
+          btn.classList.remove('border-transparent', 'text-slate-400');
+          content.classList.remove('hidden');
+        } else {
+          btn.classList.remove('border-red-500', 'text-white');
+          btn.classList.add('border-transparent', 'text-slate-400');
+          content.classList.add('hidden');
+        }
+      });
+      if (tab === 'calendar') loadCalendar();
+      if (tab === 'clips') loadClips();
+      if (tab === 'aibus') loadAIBusEvents();
+    }
+
+    async function triggerCheckChannels() {
+      alert('Iniciando varredura 24/7 nos 9 canais do YouTube via RSS/yt-dlp...');
+      await fetch('/api/channels/check-now', { method: 'POST' });
+      fetchStats();
+      loadChannels();
+    }
+
+    async function triggerPipelineCycle() {
+      alert('Ciclo completo da esteira disparado em segundo plano!');
+      await fetch('/api/pipeline/run-cycle', { method: 'POST' });
+      setTimeout(fetchStats, 3000);
+    }
+
+    async function autoFillSchedule() {
+      const res = await fetch('/api/scheduler/auto-fill', { method: 'POST' });
+      const data = await res.json();
+      alert(data.message);
+      loadCalendar();
+      fetchStats();
+    }
+
+    // Inicialização
+    fetchStats();
+    loadChannels();
+    setInterval(fetchStats, 15000);
+  </script>
+</body>
+</html>
