@@ -1974,17 +1974,8 @@ async function loadCookiesStatus() {
     const data = await res.json();
     const badge = document.getElementById('cookiesStatusBadge');
     if (badge) {
-      const diag = data.diagnostic || {};
-      if (!data.has_cookies) {
-        badge.textContent = 'Não configurado';
-        badge.className = 'badge';
-      } else if (diag.valid_netscape && diag.has_youtube_auth) {
-        badge.textContent = `Válido (${Math.round(data.size_bytes / 1024)} KB • ${diag.youtube_cookies || 0} cookies YT)`;
-        badge.className = 'badge badge-ok';
-      } else {
-        badge.textContent = `Atenção: ${diag.reason || 'Formato inválido'}`;
-        badge.className = 'badge badge-err';
-      }
+      badge.textContent = data.has_cookies ? `Ativo (${Math.round(data.size_bytes / 1024)} KB)` : 'Não configurado';
+      badge.className = `badge ${data.has_cookies ? 'badge-ok' : ''}`;
     }
   } catch (e) { /* ignora */ }
 }
