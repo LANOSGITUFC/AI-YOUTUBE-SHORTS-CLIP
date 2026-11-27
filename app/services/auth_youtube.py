@@ -146,11 +146,13 @@ class YouTubeAuthManager:
             existing.is_active = True
             dest_channel = existing
         else:
+            has_existing_channels = self.db.query(DestinationChannel).filter(DestinationChannel.is_active == True).count() > 0
             dest_channel = DestinationChannel(
                 name=yt_channel_title,
                 youtube_channel_id=yt_channel_id,
                 oauth_credentials_path=token_path,
                 daily_post_limit=4,
+                weight=0 if has_existing_channels else 100,
                 posting_times='["11:30", "15:00", "18:30", "21:00"]',
                 is_active=True
             )

@@ -249,17 +249,50 @@ def list_destination_channels(db: Session = Depends(get_db)):
             "youtube_channel_id": c.youtube_channel_id,
             "has_token": has_token,
             "daily_post_limit": c.daily_post_limit,
-            "weight": max(1, int(getattr(c, "weight", 1) or 1)),
+            "weight": max(0, int(c.weight if c.weight is not None else 0)),
             "posting_times": json.loads(c.posting_times) if c.posting_times else ["11:30", "15:00", "18:30", "21:00"],
             "scheduled_count": scheduled_posts_count,
             "is_active": c.is_active
         })
     return out
 
+@app.put("/api/destination-channels/weights")
+def update_all_destination_weights(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    weights_map = payload.get("weights")
+    if not isinstance(weights_map, dict) or not weights_map:
+        raise HTTPException(status_code=400, detail="Envie o campo 'weights' com os IDs dos canais e porcentagens.")
+
+    parsed: Dict[int, int] = {}
+    for k, v in weights_map.items():
+        try:
+            cid = int(k)
+            w = int(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="IDs e pesos devem ser números inteiros.")
+        if w < 0 or w > 100:
+            raise HTTPException(status_code=400, detail="Cada peso deve estar entre 0% e 100%.")
+        parsed[cid] = w
+
+    total = sum(parsed.values())
+    if total != 100:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A soma dos pesos deve ser exatamente 100% (atualmente está em {total}%)."
+        )
+
+    channels = db.query(DestinationChannel).filter(DestinationChannel.id.in_(list(parsed.keys()))).all()
+    if len(channels) != len(parsed):
+        raise HTTPException(status_code=404, detail="Um ou mais canais de destino não foram encontrados.")
+
+    for ch in channels:
+        ch.weight = parsed[ch.id]
+    db.commit()
+    return {"success": True, "total": total, "weights": parsed}
+
 @app.patch("/api/destination-channels/{channel_id}/weight")
 def update_destination_channel_weight(
     channel_id: int,
-    weight: int = Query(..., ge=1, le=100),
+    weight: int = Query(..., ge=0, le=100),
     db: Session = Depends(get_db)
 ):
     ch = db.query(DestinationChannel).filter(DestinationChannel.id == channel_id).first()

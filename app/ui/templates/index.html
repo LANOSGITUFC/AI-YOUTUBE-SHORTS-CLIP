@@ -308,6 +308,17 @@
           </a>
         </div>
 
+        <div id="weightsSummaryBar" class="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-studio-950 border border-studio-800 rounded-xl text-xs hidden">
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400">Soma da Distribuição:</span>
+            <span id="weightsTotalBadge" class="px-2.5 py-1 rounded-lg font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">100% / 100%</span>
+            <span id="weightsHint" class="text-slate-400 hidden">A soma deve fechar exatamente em 100% (canais com 0% ficam pausados).</span>
+          </div>
+          <button id="saveWeightsBtn" onclick="saveAllWeights()" class="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold transition">
+            Salvar Distribuição (%)
+          </button>
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="destinationsList">
           <!-- Renderizado via JS -->
         </div>
@@ -508,10 +519,13 @@
         const res = await fetch('/api/destination-channels');
         const channels = await res.json();
         const container = document.getElementById('destinationsList');
+        const summaryBar = document.getElementById('weightsSummaryBar');
         if (!channels.length) {
+          summaryBar.classList.add('hidden');
           container.innerHTML = '<p class="text-xs text-slate-400">Nenhum canal de destino conectado ainda.</p>';
           return;
         }
+        summaryBar.classList.remove('hidden');
         container.innerHTML = channels.map(c => `
           <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 flex flex-col justify-between">
             <div class="flex items-start justify-between">
@@ -531,25 +545,55 @@
               <span>Limite: <strong class="text-white">${c.daily_post_limit} vídeos/dia</strong></span>
               <div class="flex items-center gap-1.5">
                 <span>Peso:</span>
-                <input id="weightInput-${c.id}" type="number" min="1" max="100" value="${c.weight || 1}" class="w-14 bg-studio-900 border border-studio-700 rounded px-1.5 py-0.5 text-white text-center font-mono" />
-                <button onclick="updateChannelWeight(${c.id})" class="px-2 py-0.5 rounded bg-brand-600 hover:bg-brand-500 text-white font-semibold transition">Salvar</button>
+                <input data-channel-id="${c.id}" id="weightInput-${c.id}" type="number" min="0" max="100" value="${c.weight ?? 0}" oninput="updateWeightSummary()" class="weight-input w-16 bg-studio-900 border border-studio-700 rounded px-1.5 py-0.5 text-white text-center font-mono" />
+                <span class="text-slate-400 font-mono">%</span>
               </div>
               <span class="font-mono text-rose-400">${c.scheduled_count} agendados</span>
             </div>
           </div>
         `).join('');
+        updateWeightSummary();
       } catch (e) { console.error(e); }
     }
 
-    async function updateChannelWeight(channelId) {
-      const input = document.getElementById(`weightInput-${channelId}`);
-      if (!input) return;
-      const weight = Math.max(1, Math.min(100, parseInt(input.value || '1', 10)));
+    function updateWeightSummary() {
+      const inputs = Array.from(document.querySelectorAll('.weight-input'));
+      const total = inputs.reduce((acc, el) => acc + Math.max(0, Math.min(100, parseInt(el.value || '0', 10) || 0)), 0);
+      const badge = document.getElementById('weightsTotalBadge');
+      const hint = document.getElementById('weightsHint');
+      const btn = document.getElementById('saveWeightsBtn');
+      if (!badge || !btn) return;
+      badge.textContent = `${total}% / 100%`;
+      if (total === 100) {
+        badge.className = 'px-2.5 py-1 rounded-lg font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+        hint.classList.add('hidden');
+        btn.disabled = false;
+      } else {
+        badge.className = 'px-2.5 py-1 rounded-lg font-mono font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30';
+        hint.classList.remove('hidden');
+        btn.disabled = true;
+      }
+    }
+
+    async function saveAllWeights() {
+      const inputs = Array.from(document.querySelectorAll('.weight-input'));
+      const weights = {};
+      for (const el of inputs) {
+        const cid = el.getAttribute('data-channel-id');
+        weights[cid] = Math.max(0, Math.min(100, parseInt(el.value || '0', 10) || 0));
+      }
       try {
-        const res = await fetch(`/api/destination-channels/${channelId}/weight?weight=${weight}`, { method: 'PATCH' });
-        if (res.ok) {
-          loadDestinations();
+        const res = await fetch('/api/destination-channels/weights', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ weights })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.detail || 'Erro ao salvar distribuição.');
+          return;
         }
+        loadDestinations();
       } catch (e) { console.error(e); }
     }
 

@@ -91,7 +91,7 @@ class DestinationChannel(Base):
     youtube_channel_id = Column(String(100), nullable=True)
     oauth_credentials_path = Column(String(500), nullable=True)
     daily_post_limit = Column(Integer, default=4) # 4 videos per day
-    weight = Column(Integer, default=1, nullable=False) # Peso de distribuição entre canais (ex: 3 vs 1)
+    weight = Column(Integer, default=100, nullable=False) # Porcentagem de distribuição (0 a 100%, soma total = 100%)
     posting_times = Column(String(200), default='["11:30", "15:00", "18:30", "21:00"]') # 4 daily slots (BRT)
     affiliate_comment = Column(Text, default="🔥 Gostou do corte? Inscreva-se para mais clips diários! Link na bio para produtos gamers.")
     default_tags = Column(String(500), default="#shorts,#gaming,#viral,#clips,#humor")

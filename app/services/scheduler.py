@@ -145,21 +145,27 @@ class PostScheduler:
                     next_queues.append(q)
             queues = next_queues
 
+        eligible_channels = [ch for ch in active_channels if int(getattr(ch, "weight", 0) or 0) > 0]
+        total_weight = sum(int(getattr(ch, "weight", 0) or 0) for ch in eligible_channels)
+        if not eligible_channels or total_weight <= 0:
+            return 0
+
         scheduled_count = 0
 
         for clip in mixed_clips:
             best_channel = None
             best_score: Optional[tuple] = None
 
-            for ch in active_channels:
-                weight = max(1, int(getattr(ch, "weight", 1) or 1))
+            for ch in eligible_channels:
+                weight = int(getattr(ch, "weight", 0) or 0)
+                target_share = weight / total_weight
                 active_posts_count = (
                     self.db.query(ScheduledPost)
                     .filter(ScheduledPost.destination_channel_id == ch.id)
                     .filter(ScheduledPost.status.in_(["pending", "scheduled_on_youtube"]))
                     .count()
                 )
-                ratio = active_posts_count / weight
+                ratio = active_posts_count / target_share
 
                 empty_slots = self.get_upcoming_empty_slots(ch.id, days_ahead=14)
                 candidate_dt = (
