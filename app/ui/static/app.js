@@ -363,7 +363,7 @@ function renderClipsGrid() {
           <div class="clip-specs">
             <span class="spec-chip">${fmtSec(c.start)} → ${fmtSec(c.end)}</span>
             <span class="spec-chip">${esc(c.duration)}s</span>
-            <span class="spec-chip">${(c.editor_config && c.editor_config.layout && c.editor_config.layout.enabled) ? 'Layout personalizado' : esc(CROP_LABELS[c.crop_mode] || c.crop_mode)}</span>
+            <span class="spec-chip">${(c.editor_config && c.editor_config.layout && c.editor_config.layout.enabled) ? esc(c.editor_config.layout.name || 'Layout personalizado') : esc(CROP_LABELS[c.crop_mode] || c.crop_mode)}</span>
             ${c.is_ready ? `<span class="spec-chip">${esc(c.file_size_mb)} MB</span>` : ''}
             <span class="spec-chip">${esc(c.suggested_by)}</span>
           </div>

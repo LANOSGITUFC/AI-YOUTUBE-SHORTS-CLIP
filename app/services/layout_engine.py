@@ -30,6 +30,7 @@ MIN_CAPTION_W = 200
 MIN_CAPTION_H = 60
 
 DEFAULT_LAYOUT: Dict[str, Any] = {
+    "name": "Câmera em cima",
     "enabled": True,
     "has_cam": True,
     "background": "blur",
@@ -90,7 +91,9 @@ def normalize_layout(raw: Any) -> Optional[Dict[str, Any]]:
     cam = raw.get("cam") if isinstance(raw.get("cam"), dict) else {}
     game = raw.get("game") if isinstance(raw.get("game"), dict) else {}
     bg = str(raw.get("background") or "blur")
+    name = str(raw.get("name") or "").strip()[:80] or "Layout personalizado"
     return {
+        "name": name,
         "enabled": True,
         "has_cam": bool(raw.get("has_cam", True)),
         "background": bg if bg in ("blur", "black") else "blur",

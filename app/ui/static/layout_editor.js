@@ -20,9 +20,18 @@
 
   const LABELS = { cam: 'Câmera', game: 'Gameplay', caption: 'Legenda' };
 
+  const PRESET_NAMES = {
+    cam_top: 'Câmera em cima',
+    cam_bottom: 'Câmera embaixo',
+    cam_float: 'Câmera flutuante',
+    game_full: 'Só gameplay (cheia)',
+    game_fit: 'Gameplay inteira',
+  };
+
   const state = {
     clip: null,
     layout: null,
+    savedLayouts: [],
     selected: { space: 'dst', el: 'game' },
     img: null,
     imgAspect: 16 / 9,
@@ -59,6 +68,7 @@
 
   function defaultLayout() {
     return {
+      name: 'Câmera em cima',
       enabled: true,
       has_cam: true,
       background: 'blur',
@@ -70,18 +80,21 @@
 
   const PRESETS = {
     cam_top: (L) => {
+      L.name = PRESET_NAMES.cam_top;
       L.has_cam = true;
       L.cam.dst = { x: 0, y: 0, w: 1080, h: 760 };
       L.game.dst = { x: 0, y: 760, w: 1080, h: 1160 };
       L.caption = { x: 60, y: 1380, w: 960, h: 220 };
     },
     cam_bottom: (L) => {
+      L.name = PRESET_NAMES.cam_bottom;
       L.has_cam = true;
       L.game.dst = { x: 0, y: 0, w: 1080, h: 1160 };
       L.cam.dst = { x: 0, y: 1160, w: 1080, h: 760 };
       L.caption = { x: 60, y: 880, w: 960, h: 220 };
     },
     cam_float: (L) => {
+      L.name = PRESET_NAMES.cam_float;
       L.has_cam = true;
       L.game.src = centerVerticalSrc();
       L.game.dst = { x: 0, y: 0, w: 1080, h: 1920 };
@@ -89,12 +102,14 @@
       L.caption = { x: 60, y: 1380, w: 960, h: 220 };
     },
     game_full: (L) => {
+      L.name = PRESET_NAMES.game_full;
       L.has_cam = false;
       L.game.src = centerVerticalSrc();
       L.game.dst = { x: 0, y: 0, w: 1080, h: 1920 };
       L.caption = { x: 60, y: 1380, w: 960, h: 220 };
     },
     game_fit: (L) => {
+      L.name = PRESET_NAMES.game_fit;
       L.has_cam = false;
       L.game.src = { x: 0, y: 0, w: 1, h: 1 };
       const h = even(1080 / state.imgAspect);
@@ -121,6 +136,7 @@
     const d = defaultLayout();
     const src = L && typeof L === 'object' ? L : {};
     const out = {
+      name: String(src.name || '').trim().slice(0, 80) || 'Layout personalizado',
       enabled: true,
       has_cam: src.has_cam !== false,
       background: src.background === 'black' ? 'black' : 'blur',
@@ -183,13 +199,25 @@
             <button class="btn btn-sm" data-preset="game_full">Só gameplay (cheia)</button>
             <button class="btn btn-sm" data-preset="game_fit">Gameplay inteira</button>
           </div>
-          <div class="le-options">
-            <label class="le-check"><input type="checkbox" id="leHasCam"> Vídeo tem câmera</label>
-            <label class="le-check"><input type="checkbox" id="leKeepAspect"> Manter proporção</label>
-            <label class="le-check">Fundo
-              <select id="leBackground"><option value="blur">Desfocado</option><option value="black">Preto</option></select>
-            </label>
-            <button class="btn btn-sm" data-act="detect" id="leDetectBtn">Detectar facecam</button>
+          <div class="le-options" style="width:100%; justify-content:space-between; padding-top:6px; border-top:1px solid var(--border-subtle);">
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <label class="le-check">Nome do layout
+                <input type="text" id="leLayoutName" class="input" style="width:185px; height:28px; padding:2px 8px; font-size:12px;" placeholder="Ex: Alanzoka Topo">
+              </label>
+              <button class="btn btn-sm" data-act="save-template" title="Salva este layout com nome para reutilizar em outros clipes">Salvar modelo</button>
+              <select id="leSavedLayouts" class="select" style="width:185px; height:28px; padding:2px 8px; font-size:12px;">
+                <option value="">Meus layouts salvos...</option>
+              </select>
+              <button class="btn btn-danger btn-sm" data-act="delete-template" id="leDeleteTemplateBtn" style="display:none;" title="Excluir modelo selecionado">Excluir</button>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              <label class="le-check"><input type="checkbox" id="leHasCam"> Vídeo tem câmera</label>
+              <label class="le-check"><input type="checkbox" id="leKeepAspect"> Manter proporção</label>
+              <label class="le-check">Fundo
+                <select id="leBackground"><option value="blur">Desfocado</option><option value="black">Preto</option></select>
+              </label>
+              <button class="btn btn-sm" data-act="detect" id="leDetectBtn">Detectar facecam</button>
+            </div>
           </div>
         </div>
         <div class="le-body">
@@ -272,6 +300,20 @@
     });
     $('#leKeepAspect').addEventListener('change', (e) => { state.keepAspect = e.target.checked; });
     $('#leBackground').addEventListener('change', (e) => { state.layout.background = e.target.value; refresh(); });
+    $('#leLayoutName').addEventListener('input', (e) => { state.layout.name = e.target.value.trim() || 'Layout personalizado'; });
+    $('#leSavedLayouts').addEventListener('change', (e) => {
+      const id = e.target.value;
+      const delBtn = $('#leDeleteTemplateBtn');
+      if (delBtn) delBtn.style.display = id ? 'inline-flex' : 'none';
+      if (!id) return;
+      const found = state.savedLayouts.find((x) => x.id === id);
+      if (found && found.layout) {
+        state.layout = normalize(clone(found.layout));
+        state.layout.name = found.name;
+        toast(`Layout '${found.name}' carregado!`, 'success');
+        select('dst', state.layout.has_cam ? 'cam' : 'game');
+      }
+    });
     $('#leTime').addEventListener('input', () => { $('#leTimeLabel').textContent = fmt(+$('#leTime').value); });
     $('#leTime').addEventListener('change', () => loadFrame(+$('#leTime').value));
     ['leFx', 'leFy', 'leFw', 'leFh'].forEach((id) => $('#' + id).addEventListener('change', onFieldChange));
@@ -558,10 +600,77 @@
       case 'center-x': applyRect(space, el, Object.assign(r, { x: (W - r.w) / 2 })); break;
       case 'full-width': applyRect(space, el, Object.assign(r, { x: 0, w: W })); break;
       case 'fit-src': fitToSource(); break;
+      case 'save-template': await saveNamedTemplate(); break;
+      case 'delete-template': await deleteNamedTemplate(); break;
       case 'auto': await save(false, false); break;
       case 'save': await save(false, true); break;
       case 'save-render': await save(true, true); break;
       default: break;
+    }
+  }
+
+  async function loadSavedLayouts() {
+    try {
+      const res = await fetch('/api/layouts');
+      if (!res.ok) return;
+      const data = await res.json();
+      state.savedLayouts = data.layouts || [];
+      const sel = $('#leSavedLayouts');
+      if (sel) {
+        const prev = sel.value;
+        sel.innerHTML = '<option value="">Meus layouts salvos...</option>' +
+          state.savedLayouts.map((item) => `<option value="${escHtml(item.id)}">${escHtml(item.name)}</option>`).join('');
+        if (prev && state.savedLayouts.some((x) => x.id === prev)) sel.value = prev;
+      }
+      const delBtn = $('#leDeleteTemplateBtn');
+      if (delBtn && sel) delBtn.style.display = sel.value ? 'inline-flex' : 'none';
+    } catch (_) { /* ok */ }
+  }
+
+  async function saveNamedTemplate() {
+    const input = $('#leLayoutName');
+    const name = String(input && input.value ? input.value : state.layout.name || '').trim();
+    if (!name) {
+      toast('Digite um nome para salvar o modelo de layout.', 'error');
+      if (input) input.focus();
+      return;
+    }
+    state.layout.name = name;
+    try {
+      const res = await fetch('/api/layouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, layout: normalize(state.layout) }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast(data.detail || 'Erro ao salvar modelo.', 'error'); return; }
+      toast(`Modelo '${data.name}' salvo! Agora você pode reutilizar em qualquer clipe.`, 'success');
+      await loadSavedLayouts();
+      const sel = $('#leSavedLayouts');
+      if (sel && data.id) {
+        sel.value = data.id;
+        const delBtn = $('#leDeleteTemplateBtn');
+        if (delBtn) delBtn.style.display = 'inline-flex';
+      }
+    } catch (_) {
+      toast('Erro de rede ao salvar modelo.', 'error');
+    }
+  }
+
+  async function deleteNamedTemplate() {
+    const sel = $('#leSavedLayouts');
+    const id = sel ? sel.value : '';
+    if (!id) return;
+    if (!confirm('Excluir este modelo de layout salvo?')) return;
+    try {
+      const res = await fetch(`/api/layouts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (res.ok) {
+        toast('Modelo de layout excluído.', 'success');
+        if (sel) sel.value = '';
+        await loadSavedLayouts();
+      }
+    } catch (_) {
+      toast('Erro ao excluir modelo.', 'error');
     }
   }
 
@@ -589,7 +698,13 @@
       state.layout.cam.src = normSrc(data.src);
       state.layout.has_cam = true;
       select('src', 'cam');
-      toast(data.detected ? 'Facecam detectada e marcada no vídeo original.' : 'Nenhum rosto encontrado: marquei o canto padrão, ajuste à mão.', data.detected ? 'success' : 'info');
+      const engineInfo = data.engine ? ` (${data.corner || 'webcam'} · ${data.engine})` : '';
+      toast(
+        data.detected
+          ? `Facecam detectada com sucesso${engineInfo}!`
+          : 'Nenhum rosto encontrado neste trecho: marquei o canto padrão, ajuste à mão.',
+        data.detected ? 'success' : 'info'
+      );
       return data.detected;
     } catch (_) {
       toast('Erro de rede ao detectar a facecam.', 'error');
@@ -703,6 +818,10 @@
 
     $('#leHasCam').checked = L.has_cam;
     $('#leBackground').value = L.background;
+    const nameInput = $('#leLayoutName');
+    if (nameInput && document.activeElement !== nameInput) {
+      nameInput.value = L.name || 'Layout personalizado';
+    }
     state.root.querySelectorAll('.le-tab[data-select]').forEach((t) => {
       t.classList.toggle('active', t.dataset.select === sel.el);
     });
@@ -778,6 +897,7 @@
 
     state.root.classList.add('open');
     document.body.classList.add('le-noscroll');
+    loadSavedLayouts();
     refresh();
     if (clip.has_source_video) {
       loadFrame(t0);

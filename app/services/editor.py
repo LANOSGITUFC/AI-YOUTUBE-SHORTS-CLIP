@@ -303,7 +303,9 @@ class VideoEditor:
         facecam_box = None
         if crop_mode == "split_screen" and not framing.get("camX"):
             try:
-                facecam_box = self.facecam_detector.detect_facecam_box(video.video_path)
+                facecam_box = self.facecam_detector.detect_facecam_box(
+                    video.video_path, start_time=start_sec, end_time=end_sec
+                )
             except Exception:
                 pass
 

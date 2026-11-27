@@ -1107,7 +1107,7 @@ def clip_source_frame(clip_id: int, t: Optional[float] = None, db: Session = Dep
 
 @app.post("/api/clips/{clip_id}/detect-facecam")
 def clip_detect_facecam(clip_id: int, db: Session = Depends(get_db)):
-    """Roda o detector de facecam (OpenCV) e devolve a caixa em frações 0..1 da fonte."""
+    """Roda o detector de facecam (OpenCV 5 YuNet CNN / OpenCV 4 Haar) dentro do trecho do clipe."""
     from app.services.facecam_detector import FacecamDetector
 
     clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
@@ -1116,12 +1116,74 @@ def clip_detect_facecam(clip_id: int, db: Session = Depends(get_db)):
     video = clip.video
     if not video or not video.video_path or not os.path.exists(video.video_path):
         raise HTTPException(status_code=404, detail="Vídeo original não disponível em disco.")
-    box = FacecamDetector().detect_facecam_box(video.video_path)
+    box = FacecamDetector().detect_facecam_box(
+        video.video_path,
+        start_time=float(clip.start_time or 0.0),
+        end_time=float(clip.end_time or 0.0) if clip.end_time else None,
+    )
     return {
         "detected": bool(box.get("detected")),
         "corner": box.get("corner"),
+        "engine": box.get("engine"),
+        "samples_matched": box.get("samples_matched", 0),
         "src": {"x": box.get("rel_x"), "y": box.get("rel_y"), "w": box.get("rel_w"), "h": box.get("rel_h")},
     }
+
+
+def _load_saved_layouts(db: Session) -> list:
+    raw = _get_setting_val(db, "SAVED_LAYOUTS_JSON", "[]")
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+@app.get("/api/layouts")
+def list_saved_layouts(db: Session = Depends(get_db)):
+    """Lista todos os modelos de layout nomeados salvos pelo usuário."""
+    return {"layouts": _load_saved_layouts(db)}
+
+
+@app.post("/api/layouts")
+def save_named_layout(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    """Salva (ou atualiza) um modelo de layout nomeado para reutilizar em qualquer clipe."""
+    from app.services.layout_engine import normalize_layout
+
+    name = str(payload.get("name") or "").strip()[:80]
+    if not name:
+        raise HTTPException(status_code=400, detail="Informe um nome para o layout.")
+
+    raw_layout = dict(payload.get("layout") or {})
+    raw_layout["enabled"] = True
+    raw_layout["name"] = name
+    normalized = normalize_layout(raw_layout)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Dados de layout inválidos.")
+
+    layouts = _load_saved_layouts(db)
+    existing_idx = next((i for i, item in enumerate(layouts) if item.get("name", "").lower() == name.lower()), None)
+    if existing_idx is not None:
+        item_id = layouts[existing_idx]["id"]
+        layouts[existing_idx] = {"id": item_id, "name": name, "layout": normalized}
+    else:
+        item_id = f"lay_{uuid.uuid4().hex[:8]}"
+        layouts.append({"id": item_id, "name": name, "layout": normalized})
+
+    _upsert_setting(db, "SAVED_LAYOUTS_JSON", json.dumps(layouts, ensure_ascii=False), "Modelos de layout nomeados do Editor Visual")
+    db.commit()
+    return {"success": True, "id": item_id, "name": name, "layout": normalized}
+
+
+@app.delete("/api/layouts/{layout_id}")
+def delete_saved_layout(layout_id: str, db: Session = Depends(get_db)):
+    layouts = _load_saved_layouts(db)
+    remaining = [item for item in layouts if item.get("id") != layout_id]
+    if len(remaining) == len(layouts):
+        raise HTTPException(status_code=404, detail="Layout salvo não encontrado.")
+    _upsert_setting(db, "SAVED_LAYOUTS_JSON", json.dumps(remaining, ensure_ascii=False))
+    db.commit()
+    return {"success": True, "deleted_id": layout_id}
 
 
 @app.get("/api/clips/{clip_id}/export-pack")
