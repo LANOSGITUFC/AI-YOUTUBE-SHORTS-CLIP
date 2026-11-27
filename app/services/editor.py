@@ -220,22 +220,37 @@ class VideoEditor:
             preset.update(style_override)
 
         # Layout personalizado do editor visual (câmera/gameplay/legenda arrastáveis)
-        custom_layout = normalize_layout(ed_cfg.get("layout"))
+        raw_layout = ed_cfg.get("layout") or ed_cfg.get("customLayout")
+        custom_layout = normalize_layout(raw_layout)
         if custom_layout:
             preset.pop("position_y", None)
             preset.update(caption_style_overrides(custom_layout))
 
         use_subtitles = bool(ed_cfg.get("caption_enabled", preset.get("enable_subtitles", True)))
-        motion_type = str(ed_cfg.get("motion_type") or ("punch-in" if (enable_vfx if enable_vfx is not None else preset.get("enable_vfx", False)) else "none"))
-        transition_type = str(ed_cfg.get("transition_type") or "hard-cut")
+        motion_type = str(ed_cfg.get("motion_type") or ed_cfg.get("motion") or ("punch-in" if (enable_vfx if enable_vfx is not None else preset.get("enable_vfx", False)) else "none"))
+        transition_type = str(ed_cfg.get("transition_type") or ed_cfg.get("transition") or "hard-cut")
         auto_color = ed_cfg.get("auto_color") if isinstance(ed_cfg.get("auto_color"), dict) else {}
         framing = ed_cfg.get("framing") if isinstance(ed_cfg.get("framing"), dict) else {}
-        progress_bar = bool(ed_cfg.get("progress_bar", False))
+        progress_bar = bool(ed_cfg.get("progress_bar", ed_cfg.get("progressBar", False)))
         headline_text = str(ed_cfg.get("headline_text") or "").strip()
-        remove_silences = bool(ed_cfg.get("remove_silences", False))
+        hook_enabled = bool(ed_cfg.get("hook_enabled", False))
+        hook_banner_text = str(ed_cfg.get("hook_banner_text") or (clip.hook_text if hook_enabled else "") or "").strip()
+        hook_duration = max(1.0, min(6.0, float(ed_cfg.get("hook_duration", 2.8) or 2.8)))
+        remove_silences = bool(ed_cfg.get("remove_silences", ed_cfg.get("removeSilence", False)))
         watermark_text = str(ed_cfg.get("watermark_text") if ed_cfg.get("watermark_text") is not None else preset.get("watermark_text", "")).strip()
         watermark_pos = str(preset.get("watermark_position") or "top-right")
         watermark_opacity = max(0.1, min(1.0, float(preset.get("watermark_opacity", 0.70))))
+
+        # BGM (Música de Fundo com Auto-Ducking via sidechaincompress)
+        bgm_file = str(ed_cfg.get("bgm_file") or "").strip()
+        bgm_path: Optional[str] = None
+        if bgm_file:
+            safe_bgm = os.path.basename(bgm_file)
+            candidate_bgm = os.path.abspath(os.path.join("./data/bgm", safe_bgm))
+            if os.path.isfile(candidate_bgm):
+                bgm_path = candidate_bgm
+        bgm_volume = max(0.02, min(0.85, float(ed_cfg.get("bgm_volume", 0.18) or 0.18)))
+        bgm_ducking = bool(ed_cfg.get("bgm_ducking", True))
 
         clip_output_path = os.path.abspath(os.path.join(CLIPS_DIR, f"clip_{clip_id}.mp4"))
         thumbnail_output_path = os.path.abspath(os.path.join(THUMBNAILS_DIR, f"thumb_{clip_id}.jpg"))
@@ -294,10 +309,27 @@ class VideoEditor:
             )
         clip.subtitles_path = ass_subtitles_path
 
-        # 4. Detecta facecam para split_screen
+        # 4. Detecta facecam dinamicamente (mesmo em layouts salvos quando auto_detect_cam estiver ativo!)
         crop_mode = clip.crop_mode or "split_screen"
+        auto_detect_cam = bool(ed_cfg.get("auto_detect_cam", (raw_layout or {}).get("autoDetectCam", False) if isinstance(raw_layout, dict) else False))
         if custom_layout:
             crop_mode = "custom"
+            if auto_detect_cam and custom_layout.get("cam", {}).get("enabled"):
+                try:
+                    dyn_cam = self.facecam_detector.detect_facecam_box(
+                        video.video_path, start_time=start_sec, end_time=end_sec
+                    )
+                    if dyn_cam and dyn_cam.get("detected") and dyn_cam.get("frame_w") and dyn_cam.get("frame_h"):
+                        fw = float(dyn_cam["frame_w"])
+                        fh = float(dyn_cam["frame_h"])
+                        custom_layout["cam"]["src"] = {
+                            "x": round(max(0.0, min(0.95, dyn_cam["x"] / fw)), 4),
+                            "y": round(max(0.0, min(0.95, dyn_cam["y"] / fh)), 4),
+                            "w": round(max(0.08, min(0.55, dyn_cam["w"] / fw)), 4),
+                            "h": round(max(0.08, min(0.55, dyn_cam["h"] / fh)), 4),
+                        }
+                except Exception:
+                    pass
             framing = dict(framing)
             framing["layout"] = custom_layout
         facecam_box = None
@@ -309,7 +341,7 @@ class VideoEditor:
             except Exception:
                 pass
 
-        # 5. Monta filtergraph completo OpusClip
+        # 5. Monta filtergraph completo OpusClip (+ Hook Visual + BGM Auto-Ducking)
         filter_complex, v_out, a_out = self._build_opus_filtergraph(
             crop_mode=crop_mode,
             facecam_box=facecam_box,
@@ -321,6 +353,8 @@ class VideoEditor:
             auto_color=auto_color,
             progress_bar=progress_bar,
             headline_text=headline_text,
+            hook_banner_text=hook_banner_text if hook_enabled else "",
+            hook_duration=hook_duration,
             ass_path=ass_subtitles_path if use_subtitles else None,
             watermark_text=watermark_text,
             watermark_pos=watermark_pos,
@@ -330,6 +364,9 @@ class VideoEditor:
             enable_legacy_vfx=bool(enable_vfx) if enable_vfx is not None else False,
             shake_windows=shake_windows,
             source_fps=self._detect_video_fps(video.video_path),
+            bgm_path=bgm_path,
+            bgm_volume=bgm_volume,
+            bgm_ducking=bgm_ducking,
         )
 
         # Execução principal
@@ -341,8 +378,9 @@ class VideoEditor:
             v_map=v_out,
             a_map=a_out,
             output_path=clip_output_path,
-            has_audio=has_audio,
-            normalize_audio=True,
+            has_audio=has_audio or bool(bgm_path),
+            normalize_audio=(a_out == "0:a:0?"),
+            bgm_path=bgm_path,
         )
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
@@ -435,6 +473,11 @@ class VideoEditor:
         enable_legacy_vfx: bool,
         shake_windows: Optional[list],
         source_fps: str,
+        hook_banner_text: str = "",
+        hook_duration: float = 2.8,
+        bgm_path: Optional[str] = None,
+        bgm_volume: float = 0.18,
+        bgm_ducking: bool = True,
     ) -> Tuple[str, str, str]:
         parts: List[str] = []
         v_src = "[0:v]"
@@ -522,13 +565,21 @@ class VideoEditor:
             )
             cur_v = "[vpbar]"
 
-        # Overlays de texto: Headline + Legendas ASS + Marca d'água
+        # Overlays de texto: Hook Visual (primeiros ~2.8s) + Headline + Legendas ASS + Marca d'água
         text_ops: List[str] = []
+        if hook_banner_text:
+            safe_hook = _escape_drawtext(hook_banner_text)[:54]
+            if safe_hook:
+                text_ops.append(
+                    f"drawtext=text='{safe_hook}':fontcolor=#FFE600:fontsize=50:box=1:boxcolor=black@0.86:boxborderw=22:x=(w-text_w)/2:y=115:enable='between(t,0,{hook_duration:.2f})'"
+                )
+
         if headline_text:
             safe_hl = _escape_drawtext(headline_text)[:62]
             if safe_hl:
+                y_pos = 215 if hook_banner_text else 95
                 text_ops.append(
-                    f"drawtext=text='{safe_hl}':fontcolor=white:fontsize=46:box=1:boxcolor=black@0.72:boxborderw=18:x=(w-text_w)/2:y=95"
+                    f"drawtext=text='{safe_hl}':fontcolor=white:fontsize=46:box=1:boxcolor=black@0.72:boxborderw=18:x=(w-text_w)/2:y={y_pos}"
                 )
 
         if ass_path and os.path.exists(ass_path):
@@ -557,6 +608,29 @@ class VideoEditor:
             parts.append(f"{cur_v}null[v]")
             cur_v = "[v]"
 
+        # BGM com Auto-Ducking real (sidechaincompress)
+        if bgm_path and os.path.isfile(bgm_path):
+            voice_ref = a_out if a_out.startswith("[") else "[0:a:0]"
+            if has_audio:
+                if bgm_ducking:
+                    parts.append(
+                        f"{voice_ref}asplit=2[voice_main][voice_sc];"
+                        f"[1:a:0]atrim=0:{eff_duration + 0.5:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume:.3f}[bgm_raw];"
+                        f"[bgm_raw][voice_sc]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=250[bgm_ducked];"
+                        f"[voice_main][bgm_ducked]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I=-14:LRA=7:tp=-1.5[amix_out]"
+                    )
+                else:
+                    parts.append(
+                        f"[1:a:0]atrim=0:{eff_duration + 0.5:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume:.3f}[bgm_raw];"
+                        f"{voice_ref}[bgm_raw]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I=-14:LRA=7:tp=-1.5[amix_out]"
+                    )
+                a_out = "[amix_out]"
+            else:
+                parts.append(
+                    f"[1:a:0]atrim=0:{eff_duration + 0.5:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume:.3f}[amix_out]"
+                )
+                a_out = "[amix_out]"
+
         return ";".join(parts), cur_v, a_out
 
     def _build_ffmpeg_command(
@@ -570,15 +644,20 @@ class VideoEditor:
         output_path: str,
         has_audio: bool,
         normalize_audio: bool = True,
+        bgm_path: Optional[str] = None,
     ) -> list:
         cmd = [
             "ffmpeg", "-y",
             "-ss", f"{start_time:.2f}",
             "-t", f"{duration:.2f}",
             "-i", input_path,
+        ]
+        if bgm_path and os.path.isfile(bgm_path):
+            cmd.extend(["-stream_loop", "-1", "-i", bgm_path])
+        cmd.extend([
             "-filter_complex", vf_filter,
             "-map", v_map,
-        ]
+        ])
         if has_audio:
             cmd.extend(["-map", a_map])
             cmd.extend(["-c:a", "aac", "-b:a", "192k", "-ar", "48000"])
@@ -593,6 +672,7 @@ class VideoEditor:
             "-preset", "veryfast",
             "-crf", "21",
             "-movflags", "+faststart",
+            "-shortest",
             output_path,
         ])
         return cmd

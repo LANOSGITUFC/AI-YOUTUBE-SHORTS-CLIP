@@ -57,6 +57,13 @@
           <span class="nav-count" id="navCountExperiments">0</span>
         </button>
 
+        <button class="nav-item" data-view="analytics" onclick="switchView('analytics')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-5 4 3 5-7"/></svg>
+            Analytics & Drive
+          </span>
+        </button>
+
         <button class="nav-item" data-view="timeline" onclick="switchView('timeline')">
           <span class="nav-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M7 6v12M17 6v12"/></svg>
@@ -179,12 +186,17 @@
               <h2 class="section-title">Biblioteca de Cortes</h2>
               <p class="section-desc">Revise cortes gerados com sub-scores OpusClip (Hook, Ritmo, História), abra o Editor Visual de Layout ou personalize legendas/VFX.</p>
             </div>
-            <div class="filter-pills">
-              <button class="pill-btn active" data-clip-filter="all" onclick="setClipFilter('all', this)">Todos</button>
-              <button class="pill-btn" data-clip-filter="liked" onclick="setClipFilter('liked', this)">Favoritos</button>
-              <button class="pill-btn" data-clip-filter="analyzed" onclick="setClipFilter('analyzed', this)">Aguardando render</button>
-              <button class="pill-btn" data-clip-filter="rendered" onclick="setClipFilter('rendered', this)">Prontos (MP4)</button>
-              <button class="pill-btn" data-clip-filter="scheduled" onclick="setClipFilter('scheduled', this)">Agendados</button>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <div class="filter-pills">
+                <button class="pill-btn active" data-clip-filter="all" onclick="setClipFilter('all', this)">Todos</button>
+                <button class="pill-btn" data-clip-filter="liked" onclick="setClipFilter('liked', this)">Favoritos</button>
+                <button class="pill-btn" data-clip-filter="analyzed" onclick="setClipFilter('analyzed', this)">Aguardando render</button>
+                <button class="pill-btn" data-clip-filter="rendered" onclick="setClipFilter('rendered', this)">Prontos (MP4)</button>
+                <button class="pill-btn" data-clip-filter="scheduled" onclick="setClipFilter('scheduled', this)">Agendados</button>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="exportClipsBatchZip()" title="Baixar .zip com MP4 + Thumb + SEO para TikTok/Reels/Kwai">
+                Exportar lote (.zip)
+              </button>
             </div>
           </div>
           <div class="panel rank-panel">
@@ -320,6 +332,53 @@
 
             <div id="expWinnersGrid" class="exp-winners-grid"></div>
             <div id="expMatrixGrid" class="exp-days-grid"></div>
+          </div>
+        </section>
+
+        <!-- VIEW 3C: ANALYTICS, GOOGLE DRIVE ARCHIVER, BGM & MULTI-KEY POOL -->
+        <section id="view-analytics" class="view-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Analytics Real, Biblioteca BGM & Arquivo no Google Drive</h2>
+              <p class="section-desc">Acompanhe views/retenção por canal, streamer e cena (integrado ao Lab 7 Dias), gerencie trilhas BGM com auto-ducking e arquive lives processadas no Drive sem perder cenas inéditas.</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadAnalyticsAndStorageView()">Atualizar painel</button>
+          </div>
+
+          <div id="analyticsKpiGrid" class="exp-winners-grid"></div>
+
+          <div class="form-grid-2" style="margin-top:16px; align-items:start;">
+            <div class="panel">
+              <h3 class="rank-title" style="margin-bottom:8px;">Performance por Canal & Cena</h3>
+              <div id="analyticsBreakdowns"></div>
+            </div>
+            <div class="panel">
+              <h3 class="rank-title" style="margin-bottom:8px;">Top Shorts (Views & Retenção)</h3>
+              <div id="analyticsTopShorts"></div>
+            </div>
+          </div>
+
+          <div class="form-grid-2" style="margin-top:16px; align-items:start;">
+            <div class="panel">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <div>
+                  <h3 class="rank-title">Biblioteca BGM (Auto-Ducking)</h3>
+                  <p class="section-desc">Envie trilhas .mp3/.wav — o FFmpeg baixa a música automaticamente quando o streamer fala.</p>
+                </div>
+                <label class="btn btn-primary btn-sm" style="cursor:pointer;">
+                  Enviar BGM
+                  <input type="file" id="bgmUploadInput" accept=".mp3,.wav,.m4a,.ogg,.aac" style="display:none;" onchange="uploadBgmTrack(event)">
+                </label>
+              </div>
+              <div id="bgmTracksList"></div>
+            </div>
+
+            <div class="panel">
+              <h3 class="rank-title">Arquivo de Lives no Google Drive & Pool Multi-Keys</h3>
+              <p class="section-desc" style="margin-bottom:10px;">Em vez de apagar lives processadas, arquive-as no Drive para liberar disco e restaure depois para novos cortes ou compilados.</p>
+              <div id="driveStorageBox" style="margin-bottom:12px;"></div>
+              <div id="keyPoolStatusBox"></div>
+            </div>
           </div>
         </section>
 
@@ -781,6 +840,32 @@
             <input id="editClipAutoColor" type="checkbox">
           </label>
         </div>
+        <div class="form-grid-3">
+          <label class="switch-row">
+            <span>Hook Visual (2.8s)</span>
+            <input id="editClipHookEnabled" type="checkbox">
+          </label>
+          <label class="switch-row">
+            <span>Auto-detectar Cam</span>
+            <input id="editClipAutoDetectCam" type="checkbox">
+          </label>
+          <label class="switch-row">
+            <span>BGM Auto-Ducking</span>
+            <input id="editClipBgmDucking" type="checkbox" checked>
+          </label>
+        </div>
+        <div class="form-grid-2">
+          <div class="field">
+            <label for="editClipBgmFile">Música de Fundo (BGM)</label>
+            <select id="editClipBgmFile" class="select">
+              <option value="">Sem música de fundo</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="editClipBgmVolume">Volume BGM (0.05 a 0.60)</label>
+            <input id="editClipBgmVolume" type="number" step="0.02" min="0.05" max="0.60" value="0.18" class="input input-mono">
+          </div>
+        </div>
         <div style="border-top:1px solid var(--border-subtle); padding-top:12px; display:flex; flex-direction:column; gap:10px;">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
             <strong style="font-size:12.5px;">SEO para YouTube Shorts, TikTok & Reels</strong>
@@ -801,8 +886,11 @@
             </div>
           </div>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding-top:4px;">
-          <button type="button" class="btn btn-sm" onclick="generateAiEmojisForEditClip()">Injetar AI Emojis nas legendas</button>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding-top:4px; flex-wrap:wrap;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm" onclick="openWordsEditorForEditClip()">Editar legendas palavra por palavra</button>
+            <button type="button" class="btn btn-sm" onclick="generateAiEmojisForEditClip()">Injetar AI Emojis</button>
+          </div>
           <span id="editClipEmojisStatus" style="font-size:11.5px; color:var(--text-muted);"></span>
         </div>
       </div>
@@ -810,6 +898,25 @@
         <button class="btn btn-sm" onclick="closeModal('editClipModal')">Cancelar</button>
         <button class="btn btn-sm" onclick="saveClipEdits(false)">Salvar</button>
         <button class="btn btn-primary btn-sm" onclick="saveClipEdits(true)">Salvar e renderizar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: EDITOR DE LEGENDAS PALAVRA POR PALAVRA -->
+  <div class="modal-backdrop" id="wordsEditorModal">
+    <div class="modal-card" style="max-width:680px;">
+      <div class="modal-head">
+        <h3 id="wordsEditorTitle">Editor de Legendas Palavra por Palavra</h3>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('wordsEditorModal')">Fechar</button>
+      </div>
+      <div class="modal-body" style="max-height:60vh; overflow-y:auto;">
+        <p class="section-desc" style="margin-bottom:10px;">Corrija nomes próprios, gírias ou erros de transcrição mantendo o timestamp exato de cada palavra.</p>
+        <div id="wordsEditorList" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-sm" onclick="closeModal('wordsEditorModal')">Cancelar</button>
+        <button class="btn btn-sm" onclick="saveEditedWords(false)">Salvar palavras</button>
+        <button class="btn btn-primary btn-sm" onclick="saveEditedWords(true)">Salvar e re-renderizar</button>
       </div>
     </div>
   </div>

@@ -5,6 +5,7 @@ const VIEW_TITLES = {
   queue: 'Fila & Esteira',
   calendar: 'Agenda Semanal (4/dia × 7 dias)',
   experiments: 'Laboratório 7 Dias — Testes A/B por Canal',
+  analytics: 'Analytics Real, BGM & Google Drive',
   timeline: 'Inspetor de Deduplicação & Linha do Tempo',
   presets: 'Estilo de Legendas & Presets',
   channels: 'Canais Monitorados 24/7',
@@ -104,6 +105,7 @@ function refreshCurrentView() {
   else if (currentView === 'queue') loadVideosTable();
   else if (currentView === 'calendar') loadCalendar();
   else if (currentView === 'experiments') loadExperimentsView();
+  else if (currentView === 'analytics') loadAnalyticsAndStorageView();
   else if (currentView === 'timeline') loadVideosForTimeline();
   else if (currentView === 'presets') {
     loadSettingsIntoUI();
@@ -475,6 +477,20 @@ async function openEditClipModal(clipId) {
   document.getElementById('editClipProgressBar').checked = Boolean(ed.progress_bar);
   document.getElementById('editClipRemoveSilences').checked = Boolean(ed.remove_silences);
   document.getElementById('editClipAutoColor').checked = Boolean(ed.auto_color && ed.auto_color.enabled);
+  if (document.getElementById('editClipHookEnabled')) document.getElementById('editClipHookEnabled').checked = Boolean(ed.hook_enabled);
+  if (document.getElementById('editClipAutoDetectCam')) document.getElementById('editClipAutoDetectCam').checked = Boolean(ed.auto_detect_cam);
+  if (document.getElementById('editClipBgmDucking')) document.getElementById('editClipBgmDucking').checked = ed.bgm_ducking !== false;
+  if (document.getElementById('editClipBgmVolume')) document.getElementById('editClipBgmVolume').value = ed.bgm_volume ?? 0.18;
+  const bgmSel = document.getElementById('editClipBgmFile');
+  if (bgmSel) {
+    try {
+      const bgmRes = await fetch('/api/bgm');
+      const tracks = bgmRes.ok ? await bgmRes.json() : [];
+      bgmSel.innerHTML = '<option value="">Sem música de fundo</option>' +
+        tracks.map((t) => `<option value="${esc(t.filename)}">${esc(t.filename)} (${t.size_kb} KB)</option>`).join('');
+      bgmSel.value = ed.bgm_file || '';
+    } catch (e) { /* ignora */ }
+  }
   if (document.getElementById('editClipSeoDesc')) document.getElementById('editClipSeoDesc').value = ed.seo_description || '';
   if (document.getElementById('editClipSeoTags')) document.getElementById('editClipSeoTags').value = ed.seo_tags || '';
   if (document.getElementById('editClipSeoHashtags')) document.getElementById('editClipSeoHashtags').value = ed.seo_hashtags || '';
@@ -546,6 +562,11 @@ async function saveClipEdits(renderAfter) {
       progress_bar: Boolean(document.getElementById('editClipProgressBar')?.checked),
       remove_silences: Boolean(document.getElementById('editClipRemoveSilences')?.checked),
       auto_color: autoColorOn ? { enabled: true, sharpen: 0.5, denoise: 0.3, deblock: true, glow: false } : { enabled: false },
+      hook_enabled: Boolean(document.getElementById('editClipHookEnabled')?.checked),
+      auto_detect_cam: Boolean(document.getElementById('editClipAutoDetectCam')?.checked),
+      bgm_file: document.getElementById('editClipBgmFile')?.value || '',
+      bgm_volume: parseFloat(document.getElementById('editClipBgmVolume')?.value || '0.18') || 0.18,
+      bgm_ducking: Boolean(document.getElementById('editClipBgmDucking')?.checked),
       seo_description: document.getElementById('editClipSeoDesc')?.value.trim() || '',
       seo_tags: document.getElementById('editClipSeoTags')?.value.trim() || '',
       seo_hashtags: document.getElementById('editClipSeoHashtags')?.value.trim() || '',
@@ -2229,5 +2250,212 @@ async function deleteExperimentById(expId) {
     }
   } catch (e) {
     showToast('Erro ao remover experimento.', 'error');
+  }
+}
+
+/* ==========================================
+   ANALYTICS, BGM, GOOGLE DRIVE, PALAVRAS & EXPORT ZIP
+   ========================================== */
+let wordsEditorClipId = null;
+let wordsEditorBuffer = [];
+
+async function exportClipsBatchZip() {
+  showToast('Gerando pacote .zip com MP4 + Thumb + SEO...', 'info');
+  try {
+    const res = await fetch('/api/clips/export-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.detail || 'Nenhum clipe renderizado disponível para exportar.', 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'clipper_shorts_pack.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast('Pacote .zip baixado! Pronto para TikTok, Reels e Kwai.', 'success');
+  } catch (e) {
+    showToast('Erro de rede ao exportar lote .zip.', 'error');
+  }
+}
+
+async function openWordsEditorForEditClip() {
+  const clipId = Number(document.getElementById('editClipId')?.value || 0);
+  if (!clipId) return;
+  wordsEditorClipId = clipId;
+  try {
+    const res = await fetch(`/api/clips/${clipId}/words`);
+    const data = await res.json();
+    wordsEditorBuffer = Array.isArray(data.words) ? data.words : [];
+    const listEl = document.getElementById('wordsEditorList');
+    if (listEl) {
+      if (!wordsEditorBuffer.length) {
+        listEl.innerHTML = '<div class="empty-state">Nenhuma palavra transcrita encontrada nesta janela do clipe.</div>';
+      } else {
+        listEl.innerHTML = wordsEditorBuffer.map((w, i) => `
+          <div style="display:flex; flex-direction:column; gap:2px; background:#141418; border:1px solid #26262e; border-radius:8px; padding:6px;">
+            <input type="text" class="input" style="width:110px; padding:4px 6px; font-size:12px;" value="${esc(w.word)}" oninput="wordsEditorBuffer[${i}].word = this.value">
+            <span style="font-size:10px; color:var(--text-muted); font-family:'JetBrains Mono',monospace;">${Number(w.start).toFixed(1)}s</span>
+          </div>
+        `).join('');
+      }
+    }
+    setText('wordsEditorTitle', `Legendas Palavra por Palavra — Clipe #${clipId} (${wordsEditorBuffer.length} palavras)`);
+    openModal('wordsEditorModal');
+  } catch (e) {
+    showToast('Erro ao carregar palavras do clipe.', 'error');
+  }
+}
+
+async function saveEditedWords(reRender) {
+  if (!wordsEditorClipId) return;
+  try {
+    const res = await fetch(`/api/clips/${wordsEditorClipId}/words`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ words: wordsEditorBuffer, re_render: Boolean(reRender) }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao salvar palavras.', 'error');
+      return;
+    }
+    closeModal('wordsEditorModal');
+    showToast(reRender ? `${data.words_count} palavras salvas! Re-renderizando em segundo plano...` : `${data.words_count} palavras salvas!`, 'success');
+  } catch (e) {
+    showToast('Erro de rede ao salvar palavras.', 'error');
+  }
+}
+
+async function loadAnalyticsAndStorageView() {
+  try {
+    const [anRes, bgmRes, stRes, kpRes] = await Promise.all([
+      fetch('/api/analytics/overview'),
+      fetch('/api/bgm'),
+      fetch('/api/storage/status'),
+      fetch('/api/settings/key-pool'),
+    ]);
+    const an = anRes.ok ? await anRes.json() : {};
+    const bgms = bgmRes.ok ? await bgmRes.json() : [];
+    const st = stRes.ok ? await stRes.json() : {};
+    const kp = kpRes.ok ? await kpRes.json() : [];
+
+    const kpiEl = document.getElementById('analyticsKpiGrid');
+    if (kpiEl) {
+      kpiEl.innerHTML = `
+        <div class="exp-winner-card"><div class="exp-winner-label">Views Totais</div><div class="exp-winner-val">${Number(an.total_views || 0).toLocaleString('pt-BR')}</div><div class="exp-winner-sub">${an.total_posts || 0} posts na grade</div></div>
+        <div class="exp-winner-card"><div class="exp-winner-label">Likes Totais</div><div class="exp-winner-val">${Number(an.total_likes || 0).toLocaleString('pt-BR')}</div><div class="exp-winner-sub">${Number(an.total_comments || 0).toLocaleString('pt-BR')} comentários</div></div>
+        <div class="exp-winner-card"><div class="exp-winner-label">Retenção Média</div><div class="exp-winner-val">${an.avg_retention_pct || 0}%</div><div class="exp-winner-sub">Alimenta o Lab 7 Dias</div></div>
+        <div class="exp-winner-card"><div class="exp-winner-label">Disco (Lives Brutas)</div><div class="exp-winner-val">${st.raw_size_mb || 0} MB</div><div class="exp-winner-sub">${st.raw_files_count || 0} arquivos locais • ${st.archived_count || 0} no Drive</div></div>
+      `;
+    }
+
+    const bdEl = document.getElementById('analyticsBreakdowns');
+    if (bdEl) {
+      const chRows = (an.by_channel || []).map((c) => `<div class="exp-metrics-row"><span><strong>${esc(c.channel_name)}</strong> (${c.posts} posts)</span><span>👁 ${c.views} • 👍 ${c.likes}</span></div>`).join('');
+      const scRows = (an.by_scene || []).map((s) => `<div class="exp-metrics-row"><span>Cena: <strong>${esc(s.scene)}</strong> (${s.posts})</span><span>👁 ${s.views} • 👍 ${s.likes}</span></div>`).join('');
+      bdEl.innerHTML = (chRows || '<div class="empty-state">Sem posts ainda.</div>') + (scRows ? `<div style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border);">${scRows}</div>` : '');
+    }
+
+    const topEl = document.getElementById('analyticsTopShorts');
+    if (topEl) {
+      const items = (an.top_shorts || []).slice(0, 8);
+      topEl.innerHTML = items.length
+        ? items.map((s) => `<div class="exp-metrics-row"><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:65%;" title="${esc(s.title)}"><strong>${esc(s.title)}</strong> (${esc(s.streamer)})</span><span>👁 ${s.views} • ⏱ ${s.retention_pct}%</span></div>`).join('')
+        : '<div class="empty-state">Nenhum Short medido ainda. Lance métricas no Lab 7 Dias ou conecte OAuth.</div>';
+    }
+
+    const bgmEl = document.getElementById('bgmTracksList');
+    if (bgmEl) {
+      bgmEl.innerHTML = bgms.length
+        ? bgms.map((t) => `
+          <div class="exp-metrics-row">
+            <span>🎵 <strong>${esc(t.filename)}</strong> (${t.size_kb} KB)</span>
+            <button class="btn btn-ghost btn-sm" onclick="deleteBgmTrack('${esc(t.filename)}')">Remover</button>
+          </div>
+        `).join('')
+        : '<div class="empty-state">Nenhuma trilha BGM enviada ainda. Clique em "Enviar BGM" para adicionar .mp3/.wav.</div>';
+    }
+
+    const drvEl = document.getElementById('driveStorageBox');
+    if (drvEl) {
+      const archivedEntries = Object.entries(st.archived_videos || {});
+      drvEl.innerHTML = `
+        <div class="exp-metrics-row"><span>Lives em disco local: <strong>${st.raw_files_count || 0}</strong> (${st.raw_size_mb || 0} MB)</span><span>Clipes 9:16: <strong>${st.clips_size_mb || 0} MB</strong></span></div>
+        <div class="exp-metrics-row"><span>rclone disponível: <strong>${st.rclone_available ? 'Sim' : 'Não'}</strong></span><span>Arquivadas no Drive: <strong>${archivedEntries.length}</strong></span></div>
+        ${archivedEntries.map(([vid, info]) => `
+          <div class="exp-metrics-row">
+            <span>☁️ ${esc(info.title || vid)} (${info.size_mb || 0} MB)</span>
+            <button class="btn btn-secondary btn-sm" onclick="restoreVideoFromDrive('${esc(vid)}')">Restaurar do Drive</button>
+          </div>
+        `).join('')}
+      `;
+    }
+
+    const kpEl = document.getElementById('keyPoolStatusBox');
+    if (kpEl) {
+      kpEl.innerHTML = `<div style="font-size:12px; font-weight:600; margin-bottom:6px;">Pool Multi-Keys de IA (Failover 429)</div>` +
+        kp.map((p) => `<div class="exp-metrics-row"><span>${esc(p.provider.toUpperCase())}</span><span>${p.healthy_keys}/${p.total_keys} chave(s) ativas${p.cooling_keys ? ` (${p.cooling_keys} em cooldown)` : ''}</span></div>`).join('') +
+        `<p class="section-desc" style="margin-top:6px;">Dica: em IA & Configurações, cole várias chaves separadas por vírgula ou quebra de linha para rotacionar automaticamente sem cair em erro 429.</p>`;
+    }
+  } catch (e) {
+    showToast('Erro ao carregar Analytics & Drive.', 'error');
+  }
+}
+
+async function uploadBgmTrack(ev) {
+  const file = ev.target?.files?.[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/api/bgm/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao enviar BGM.', 'error');
+      return;
+    }
+    showToast(`Trilha ${data.filename} enviada para a biblioteca BGM!`, 'success');
+    loadAnalyticsAndStorageView();
+  } catch (e) {
+    showToast('Erro de rede ao enviar BGM.', 'error');
+  } finally {
+    if (ev.target) ev.target.value = '';
+  }
+}
+
+async function deleteBgmTrack(filename) {
+  try {
+    const res = await fetch(`/api/bgm/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Trilha removida.', 'success');
+      loadAnalyticsAndStorageView();
+    }
+  } catch (e) {
+    showToast('Erro ao remover trilha.', 'error');
+  }
+}
+
+async function restoreVideoFromDrive(videoId) {
+  showToast('Restaurando live do Google Drive...', 'info');
+  try {
+    const res = await fetch(`/api/videos/${encodeURIComponent(videoId)}/restore-drive`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao restaurar do Drive.', 'error');
+      return;
+    }
+    showToast('Live restaurada para o disco local! Pronta para novos cortes/compilados.', 'success');
+    loadAnalyticsAndStorageView();
+  } catch (e) {
+    showToast('Erro de rede ao restaurar do Drive.', 'error');
   }
 }

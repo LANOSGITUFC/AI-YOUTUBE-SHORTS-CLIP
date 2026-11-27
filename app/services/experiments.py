@@ -160,7 +160,8 @@ SCENE_STYLE_VARIANTS: List[Dict[str, Any]] = [
         "crop_mode": "custom",
         "custom_layout": {
             "enabled": True,
-            "name": "Lab: Cam Flutuante Compacta",
+            "autoDetectCam": True,
+            "name": "Lab: Cam Flutuante Compacta (Auto-Cam)",
             "background": "blur",
             "game": {"src": {"x": 0.15, "y": 0.0, "w": 0.70, "h": 1.0}, "dst": {"x": 0, "y": 0, "w": 1080, "h": 1920}},
             "cam": {"enabled": True, "src": {"x": 0.72, "y": 0.65, "w": 0.28, "h": 0.35}, "dst": {"x": 700, "y": 60, "w": 340, "h": 340}},

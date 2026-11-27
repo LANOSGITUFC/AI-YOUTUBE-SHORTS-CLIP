@@ -1852,6 +1852,308 @@ def update_scheduled_post_metrics(post_id: int, payload: Dict[str, Any], db: Ses
 
 
 # ==========================================
+# RETENÇÃO HEATMAP, LEGENDAS PALAVRA-POR-PALAVRA, BGM, DRIVE, ANALYTICS & EXPORT ZIP
+# ==========================================
+
+BGM_DIR = "./data/bgm"
+os.makedirs(BGM_DIR, exist_ok=True)
+
+
+@app.get("/api/videos/{video_id}/heatmap")
+def get_video_retention_heatmap(video_id: str, refresh: bool = False, db: Session = Depends(get_db)):
+    from app.services.retention_heatmap import RetentionHeatmapDetector
+    video = db.query(SourceVideo).filter(SourceVideo.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Vídeo não encontrado.")
+    row = db.query(SystemSetting).filter(SystemSetting.key == "YT_COOKIES_BROWSER").first()
+    browser = (row.value or "").strip() if row else ""
+    det = RetentionHeatmapDetector()
+    points = det.get_heatmap(video.id, video_url=video.url, cookies_browser=browser, force_refresh=refresh)
+    peaks = det.get_retention_peaks(video.id, video_url=video.url, cookies_browser=browser)
+    return {"video_id": video.id, "points_count": len(points), "peaks": peaks, "points": points[:120]}
+
+
+@app.get("/api/clips/{clip_id}/words")
+def get_clip_words(clip_id: int, db: Session = Depends(get_db)):
+    clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clipe não encontrado.")
+    try:
+        ed_cfg = json.loads(clip.editor_config_json) if clip.editor_config_json else {}
+    except Exception:
+        ed_cfg = {}
+
+    if isinstance(ed_cfg.get("custom_words"), list) and ed_cfg["custom_words"]:
+        return {"clip_id": clip.id, "source": "custom", "words": ed_cfg["custom_words"]}
+
+    words = []
+    if clip.video and clip.video.transcript_path and os.path.exists(clip.video.transcript_path):
+        try:
+            with open(clip.video.transcript_path, "r", encoding="utf-8") as f:
+                t_data = json.load(f)
+            for seg in t_data.get("segments", []):
+                for w in seg.get("words", []):
+                    ws = float(w.get("start", 0))
+                    we = float(w.get("end", 0))
+                    if we >= clip.start_time and ws <= clip.end_time:
+                        words.append({
+                            "word": str(w.get("word") or "").strip(),
+                            "start": round(ws, 3),
+                            "end": round(we, 3),
+                        })
+        except Exception:
+            pass
+    return {"clip_id": clip.id, "source": "transcript", "words": words}
+
+
+@app.put("/api/clips/{clip_id}/words")
+def save_clip_words(clip_id: int, payload: Dict[str, Any], background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clipe não encontrado.")
+    raw_words = payload.get("words")
+    if not isinstance(raw_words, list):
+        raise HTTPException(status_code=400, detail="Envie uma lista 'words' válida.")
+    cleaned = []
+    for w in raw_words:
+        if isinstance(w, dict) and str(w.get("word") or "").strip():
+            cleaned.append({
+                "word": str(w["word"]).strip(),
+                "start": round(float(w.get("start", clip.start_time)), 3),
+                "end": round(float(w.get("end", clip.start_time + 0.3)), 3),
+            })
+    try:
+        ed_cfg = json.loads(clip.editor_config_json) if clip.editor_config_json else {}
+    except Exception:
+        ed_cfg = {}
+    ed_cfg["custom_words"] = cleaned
+    clip.editor_config_json = json.dumps(ed_cfg, ensure_ascii=False)
+    db.commit()
+
+    if payload.get("re_render"):
+        def _bg_render(cid: int):
+            with SessionLocal() as sdb:
+                try:
+                    VideoEditor(sdb).render_clip(cid)
+                except Exception:
+                    pass
+        background_tasks.add_task(_bg_render, clip.id)
+
+    return {"status": "saved", "clip_id": clip.id, "words_count": len(cleaned), "re_rendering": bool(payload.get("re_render"))}
+
+
+@app.get("/api/bgm")
+def list_bgm_tracks():
+    os.makedirs(BGM_DIR, exist_ok=True)
+    tracks = []
+    for fn in sorted(os.listdir(BGM_DIR)):
+        if fn.lower().endswith((".mp3", ".wav", ".m4a", ".ogg", ".aac")):
+            fp = os.path.join(BGM_DIR, fn)
+            tracks.append({"filename": fn, "size_kb": round(os.path.getsize(fp) / 1024, 1)})
+    return tracks
+
+
+@app.post("/api/bgm/upload")
+async def upload_bgm_track(file: UploadFile = File(...)):
+    os.makedirs(BGM_DIR, exist_ok=True)
+    orig = os.path.basename(file.filename or "bgm.mp3")
+    ext = os.path.splitext(orig)[1].lower()
+    if ext not in (".mp3", ".wav", ".m4a", ".ogg", ".aac"):
+        raise HTTPException(status_code=400, detail="Envie um arquivo de áudio (.mp3, .wav, .m4a, .ogg ou .aac).")
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", orig)
+    dest = os.path.join(BGM_DIR, safe_name)
+    with open(dest, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+    return {"status": "uploaded", "filename": safe_name, "size_kb": round(os.path.getsize(dest) / 1024, 1)}
+
+
+@app.delete("/api/bgm/{filename}")
+def delete_bgm_track(filename: str):
+    safe = os.path.basename(filename)
+    path = os.path.join(BGM_DIR, safe)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Trilha BGM não encontrada.")
+    os.remove(path)
+    return {"status": "deleted", "filename": safe}
+
+
+@app.get("/api/storage/status")
+def get_storage_drive_status(db: Session = Depends(get_db)):
+    from app.services.drive_archiver import DriveArchiver
+    return DriveArchiver(db).get_storage_status()
+
+
+@app.post("/api/videos/{video_id}/archive-drive")
+def archive_video_to_drive(video_id: str, payload: Optional[Dict[str, Any]] = None, db: Session = Depends(get_db)):
+    from app.services.drive_archiver import DriveArchiver
+    body = payload or {}
+    try:
+        return DriveArchiver(db).archive_video(video_id, delete_local_after=bool(body.get("delete_local_after", True)))
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/videos/{video_id}/restore-drive")
+def restore_video_from_drive(video_id: str, db: Session = Depends(get_db)):
+    from app.services.drive_archiver import DriveArchiver
+    try:
+        return DriveArchiver(db).restore_video(video_id)
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/settings/key-pool")
+def get_ai_key_pool_status(db: Session = Depends(get_db)):
+    from app.services.key_pool import get_pool_status
+    providers = [
+        ("gemini", "GEMINI_API_KEY"),
+        ("groq", "GROQ_API_KEY"),
+        ("openai", "OPENAI_API_KEY"),
+        ("claude", "ANTHROPIC_API_KEY"),
+    ]
+    out = []
+    for pname, skey in providers:
+        row = db.query(SystemSetting).filter(SystemSetting.key == skey).first()
+        raw = (row.value if row else "") or os.getenv(skey, "")
+        out.append(get_pool_status(pname, raw))
+    return out
+
+
+@app.get("/api/analytics/overview")
+def get_analytics_overview(db: Session = Depends(get_db)):
+    """
+    Painel real de Analytics (alimenta também os testes do Lab 7 Dias):
+    Views, likes, comentários, retenção média, top Shorts, breakdown por canal e por streamer.
+    """
+    from collections import defaultdict
+    posts = db.query(ScheduledPost).filter(ScheduledPost.status != "cancelled").all()
+
+    total_views = 0
+    total_likes = 0
+    total_comments = 0
+    ret_values = []
+    by_channel: Dict[int, Dict[str, Any]] = {}
+    by_streamer: Dict[str, Dict[str, Any]] = {}
+    by_scene: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"scene": "", "posts": 0, "views": 0, "likes": 0})
+    top_shorts = []
+
+    for p in posts:
+        v = int(getattr(p, "views_count", 0) or 0)
+        lk = int(getattr(p, "likes_count", 0) or 0)
+        cm = int(getattr(p, "comments_count", 0) or 0)
+        ret = float(getattr(p, "avg_retention_pct", 0.0) or 0.0)
+        total_views += v
+        total_likes += lk
+        total_comments += cm
+        if ret > 0:
+            ret_values.append(ret)
+
+        ch_id = p.destination_channel_id
+        ch_name = p.destination_channel.name if p.destination_channel else f"Canal #{ch_id}"
+        if ch_id not in by_channel:
+            by_channel[ch_id] = {"channel_id": ch_id, "channel_name": ch_name, "posts": 0, "views": 0, "likes": 0, "comments": 0}
+        by_channel[ch_id]["posts"] += 1
+        by_channel[ch_id]["views"] += v
+        by_channel[ch_id]["likes"] += lk
+        by_channel[ch_id]["comments"] += cm
+
+        if p.clip:
+            st_name = p.clip.video.channel.name if (p.clip.video and p.clip.video.channel) else "Streamer"
+            if st_name not in by_streamer:
+                by_streamer[st_name] = {"streamer": st_name, "posts": 0, "views": 0, "likes": 0}
+            by_streamer[st_name]["posts"] += 1
+            by_streamer[st_name]["views"] += v
+            by_streamer[st_name]["likes"] += lk
+
+            sc = p.clip.crop_mode or "split_screen"
+            by_scene[sc]["scene"] = sc
+            by_scene[sc]["posts"] += 1
+            by_scene[sc]["views"] += v
+            by_scene[sc]["likes"] += lk
+
+            top_shorts.append({
+                "post_id": p.id,
+                "clip_id": p.clip.id,
+                "title": p.clip.title,
+                "channel_name": ch_name,
+                "streamer": st_name,
+                "crop_mode": sc,
+                "status": p.status,
+                "views": v,
+                "likes": lk,
+                "comments": cm,
+                "retention_pct": ret,
+                "youtube_url": p.youtube_url,
+            })
+
+    top_shorts.sort(key=lambda x: (x["views"], x["likes"], x["retention_pct"]), reverse=True)
+    return {
+        "total_posts": len(posts),
+        "total_views": total_views,
+        "total_likes": total_likes,
+        "total_comments": total_comments,
+        "avg_retention_pct": round(sum(ret_values) / len(ret_values), 1) if ret_values else 0.0,
+        "by_channel": sorted(by_channel.values(), key=lambda x: x["views"], reverse=True),
+        "by_streamer": sorted(by_streamer.values(), key=lambda x: x["views"], reverse=True),
+        "by_scene": sorted(by_scene.values(), key=lambda x: x["views"], reverse=True),
+        "top_shorts": top_shorts[:15],
+    }
+
+
+@app.post("/api/clips/export-batch")
+def export_clips_batch_zip(payload: Optional[Dict[str, Any]] = None, db: Session = Depends(get_db)):
+    """
+    Exportação em lote (.zip) pronta para TikTok, Instagram Reels e Kwai:
+    Inclui MP4 + Thumbnail JPG + SEO_LEGENDA.txt (título, descrição, tags e hashtags) por clipe.
+    """
+    import io
+    import zipfile
+    from app.services.seo_engine import ViralSEOEngine
+
+    body = payload or {}
+    clip_ids = body.get("clip_ids")
+    query = db.query(ClipSegment)
+    if isinstance(clip_ids, list) and clip_ids:
+        query = query.filter(ClipSegment.id.in_([int(x) for x in clip_ids]))
+    else:
+        query = query.filter(ClipSegment.status.in_(["rendered", "scheduled", "published"])).order_by(ClipSegment.virality_score.desc()).limit(25)
+
+    clips = [c for c in query.all() if c.clip_path and os.path.exists(c.clip_path) and os.path.getsize(c.clip_path) > 4096]
+    if not clips:
+        raise HTTPException(status_code=400, detail="Nenhum clipe renderizado válido encontrado para exportação em lote.")
+
+    seo_engine = ViralSEOEngine(db)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
+        for idx, clip in enumerate(clips, start=1):
+            slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", (clip.title or f"clip_{clip.id}")[:36]).strip("_") or f"clip_{clip.id}"
+            folder = f"{idx:02d}_{slug}"
+            zf.write(clip.clip_path, f"{folder}/short.mp4")
+            if clip.thumbnail_path and os.path.exists(clip.thumbnail_path):
+                zf.write(clip.thumbnail_path, f"{folder}/thumbnail.jpg")
+
+            try:
+                ed_cfg = json.loads(clip.editor_config_json) if clip.editor_config_json else {}
+            except Exception:
+                ed_cfg = {}
+            seo = ed_cfg.get("seo") if isinstance(ed_cfg.get("seo"), dict) else seo_engine.generate_for_clip(clip, prefer_llm=False)
+            txt = (
+                f"TÍTULO:\n{seo.get('title') or clip.title}\n\n"
+                f"DESCRIÇÃO:\n{seo.get('description') or clip.summary or ''}\n\n"
+                f"HASHTAGS:\n{seo.get('hashtags_str') or ''}\n\n"
+                f"TAGS DE BUSCA:\n{seo.get('tags_csv') or ''}\n"
+            )
+            zf.writestr(f"{folder}/SEO_LEGENDA.txt", txt.encode("utf-8"))
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="clipper_shorts_pack.zip"'},
+    )
+
+
+# ==========================================
 # WEB DASHBOARD
 # ==========================================
 

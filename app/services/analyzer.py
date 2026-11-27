@@ -248,49 +248,67 @@ class HighlightAnalyzer:
         )
         user_prompt = self._build_transcript_prompt(video.title, segments, available_windows)
 
-        # Tenta primeiro o provedor selecionado pelo usuário
+        from app.services.key_pool import execute_with_key_pool
+
+        # Tenta primeiro o provedor selecionado pelo usuário (com pool Multi-Keys e failover automático 429)
         order = []
         if provider == "gemini" and gemini_key:
-            order.append(("gemini", lambda: self._call_gemini_llm(sys_prompt, user_prompt, gemini_key)))
+            order.append(("gemini", lambda: execute_with_key_pool("gemini", gemini_key, lambda k: self._call_gemini_llm(sys_prompt, user_prompt, k))[0]))
         elif provider == "groq" and groq_key:
-            order.append(("groq", lambda: self._call_groq_llm(sys_prompt, user_prompt, groq_key)))
+            order.append(("groq", lambda: execute_with_key_pool("groq", groq_key, lambda k: self._call_groq_llm(sys_prompt, user_prompt, k))[0]))
         elif provider == "openai" and openai_key:
-            order.append(("openai", lambda: self._call_openai_llm(sys_prompt, user_prompt, openai_key)))
+            order.append(("openai", lambda: execute_with_key_pool("openai", openai_key, lambda k: self._call_openai_llm(sys_prompt, user_prompt, k))[0]))
         elif provider == "claude" and claude_key:
-            order.append(("claude", lambda: self._call_claude_llm(sys_prompt, user_prompt, claude_key)))
+            order.append(("claude", lambda: execute_with_key_pool("claude", claude_key, lambda k: self._call_claude_llm(sys_prompt, user_prompt, k))[0]))
         elif provider == "ollama":
             order.append(("ollama", lambda: self._call_ollama_llm(sys_prompt, user_prompt, ollama_url, ollama_model)))
         elif provider != "offline":
-            # Auto-detecção se houver alguma chave configurada
             if groq_key:
-                order.append(("groq", lambda: self._call_groq_llm(sys_prompt, user_prompt, groq_key)))
+                order.append(("groq", lambda: execute_with_key_pool("groq", groq_key, lambda k: self._call_groq_llm(sys_prompt, user_prompt, k))[0]))
             if gemini_key:
-                order.append(("gemini", lambda: self._call_gemini_llm(sys_prompt, user_prompt, gemini_key)))
+                order.append(("gemini", lambda: execute_with_key_pool("gemini", gemini_key, lambda k: self._call_gemini_llm(sys_prompt, user_prompt, k))[0]))
             if openai_key:
-                order.append(("openai", lambda: self._call_openai_llm(sys_prompt, user_prompt, openai_key)))
+                order.append(("openai", lambda: execute_with_key_pool("openai", openai_key, lambda k: self._call_openai_llm(sys_prompt, user_prompt, k))[0]))
             if claude_key:
-                order.append(("claude", lambda: self._call_claude_llm(sys_prompt, user_prompt, claude_key)))
+                order.append(("claude", lambda: execute_with_key_pool("claude", claude_key, lambda k: self._call_claude_llm(sys_prompt, user_prompt, k))[0]))
 
+        detected_list = None
+        used_provider = "acoustic_hybrid"
         for name, fn in order:
             try:
                 result = fn()
                 if result:
                     logger.info("HighlightAnalyzer usou LLM real '%s' -> %d candidatos", name, len(result))
-                    return result, f"ai:{name}"
+                    detected_list = result
+                    used_provider = f"ai:{name}"
+                    break
             except Exception as exc:
                 logger.warning("Falha na chamada LLM '%s' (caindo para fallback): %s", name, exc)
 
-        return (
-            self._hybrid_acoustic_text_detector(
+        if not detected_list:
+            detected_list = self._hybrid_acoustic_text_detector(
                 video=video,
                 segments=segments,
                 available_windows=available_windows,
                 target_clips=target_clips,
                 min_dur=min_dur,
                 max_dur=max_dur,
-            ),
-            "acoustic_hybrid",
-        )
+            )
+
+        # Boost real com YouTube Retention Heatmap ("Most Replayed") se disponível em cache ou público
+        try:
+            from app.services.retention_heatmap import RetentionHeatmapDetector
+            hm = RetentionHeatmapDetector()
+            for cand in detected_list:
+                hm_score = hm.score_window(video.id, float(cand.get("start_time", 0)), float(cand.get("end_time", 0)))
+                if hm_score is not None and hm_score >= 0.45:
+                    boost = int(round((hm_score - 0.35) * 18))
+                    cand["virality_score"] = min(99, int(cand.get("virality_score", 82)) + boost)
+                    cand["retention_heatmap_score"] = round(hm_score * 100, 1)
+        except Exception:
+            pass
+
+        return detected_list, used_provider
 
     def _call_gemini_llm(self, sys_prompt: str, user_prompt: str, api_key: str) -> List[Dict[str, Any]]:
         model = self._get_setting("GEMINI_MODEL", default="gemini-2.5-flash")
