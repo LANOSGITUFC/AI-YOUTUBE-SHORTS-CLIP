@@ -527,12 +527,29 @@
                 ${c.has_token ? 'TOKEN ATIVO (OAuth)' : 'SIMULAÇÃO / SEM TOKEN'}
               </span>
             </div>
-            <div class="mt-4 pt-3 border-t border-studio-800 text-xs text-slate-400 flex justify-between items-center">
+            <div class="mt-4 pt-3 border-t border-studio-800 text-xs text-slate-400 flex flex-wrap justify-between items-center gap-2">
               <span>Limite: <strong class="text-white">${c.daily_post_limit} vídeos/dia</strong></span>
+              <div class="flex items-center gap-1.5">
+                <span>Peso:</span>
+                <input id="weightInput-${c.id}" type="number" min="1" max="100" value="${c.weight || 1}" class="w-14 bg-studio-900 border border-studio-700 rounded px-1.5 py-0.5 text-white text-center font-mono" />
+                <button onclick="updateChannelWeight(${c.id})" class="px-2 py-0.5 rounded bg-brand-600 hover:bg-brand-500 text-white font-semibold transition">Salvar</button>
+              </div>
               <span class="font-mono text-rose-400">${c.scheduled_count} agendados</span>
             </div>
           </div>
         `).join('');
+      } catch (e) { console.error(e); }
+    }
+
+    async function updateChannelWeight(channelId) {
+      const input = document.getElementById(`weightInput-${channelId}`);
+      if (!input) return;
+      const weight = Math.max(1, Math.min(100, parseInt(input.value || '1', 10)));
+      try {
+        const res = await fetch(`/api/destination-channels/${channelId}/weight?weight=${weight}`, { method: 'PATCH' });
+        if (res.ok) {
+          loadDestinations();
+        }
       } catch (e) { console.error(e); }
     }
 

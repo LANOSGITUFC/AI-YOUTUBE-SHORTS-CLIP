@@ -1,6 +1,6 @@
 import os
 import json
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from app.database.models import Base, SourceChannel, DestinationChannel, SystemSetting
 
@@ -82,6 +82,13 @@ def init_db():
     os.makedirs("./data/thumbnails", exist_ok=True)
     
     Base.metadata.create_all(bind=engine)
+
+    # Migração leve para bancos SQLite existentes sem a coluna 'weight'
+    if DATABASE_URL.startswith("sqlite"):
+        with engine.begin() as conn:
+            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(destination_channels)")).fetchall()]
+            if cols and "weight" not in cols:
+                conn.execute(text("ALTER TABLE destination_channels ADD COLUMN weight INTEGER NOT NULL DEFAULT 1"))
     
     with SessionLocal() as db:
         # Seed Source Channels

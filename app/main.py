@@ -249,11 +249,25 @@ def list_destination_channels(db: Session = Depends(get_db)):
             "youtube_channel_id": c.youtube_channel_id,
             "has_token": has_token,
             "daily_post_limit": c.daily_post_limit,
+            "weight": max(1, int(getattr(c, "weight", 1) or 1)),
             "posting_times": json.loads(c.posting_times) if c.posting_times else ["11:30", "15:00", "18:30", "21:00"],
             "scheduled_count": scheduled_posts_count,
             "is_active": c.is_active
         })
     return out
+
+@app.patch("/api/destination-channels/{channel_id}/weight")
+def update_destination_channel_weight(
+    channel_id: int,
+    weight: int = Query(..., ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    ch = db.query(DestinationChannel).filter(DestinationChannel.id == channel_id).first()
+    if not ch:
+        raise HTTPException(status_code=404, detail="Canal de destino não encontrado.")
+    ch.weight = weight
+    db.commit()
+    return {"id": ch.id, "name": ch.name, "weight": ch.weight}
 
 @app.get("/api/auth/youtube/login")
 def youtube_oauth_login(channel_name: str = "Canal Novo", db: Session = Depends(get_db)):
