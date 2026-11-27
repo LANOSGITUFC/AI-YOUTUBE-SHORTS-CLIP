@@ -168,9 +168,15 @@ def get_system_status(db: Session = Depends(get_db)):
     dest_rows = db.query(DestinationChannel).order_by(DestinationChannel.id.asc()).all()
     dest_count = len(dest_rows)
     active_dest_count = sum(1 for d in dest_rows if d.is_active)
-    experiments_count = db.query(ChannelExperiment).count()
+    try:
+        experiments_count = db.query(ChannelExperiment).count()
+    except Exception:
+        experiments_count = 0
     dest_sig = "|".join(f"{d.id}:{d.name}:{int(bool(d.is_active))}:{int(d.weight or 0)}" for d in dest_rows)
-    views_total = sum(int(p.views_count or 0) for p in db.query(ScheduledPost.views_count).all())
+    try:
+        views_total = sum(int(p[0] or 0) for p in db.query(ScheduledPost.views_count).all())
+    except Exception:
+        views_total = 0
     state_hash = f"{dest_sig}#{experiments_count}#{views_total}"
 
     return {
@@ -2257,5 +2263,13 @@ def serve_dashboard():
     template_path = "./app/ui/templates/index.html"
     if os.path.exists(template_path):
         with open(template_path, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
+            html = f.read()
+        ver = BOOT_ID[:8]
+        html = (
+            html.replace('href="/static/styles.css"', f'href="/static/styles.css?v={ver}"')
+            .replace('href="/static/layout_editor.css"', f'href="/static/layout_editor.css?v={ver}"')
+            .replace('src="/static/app.js"', f'src="/static/app.js?v={ver}"')
+            .replace('src="/static/layout_editor.js"', f'src="/static/layout_editor.js?v={ver}"')
+        )
+        return HTMLResponse(content=html, headers={"Cache-Control": "no-store, must-revalidate"})
     return HTMLResponse("<h1>AI YouTube Shorts Clip Engine is Online</h1>")

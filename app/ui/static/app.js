@@ -35,11 +35,13 @@ const CROP_LABELS = {
 let currentView = 'clips';
 let currentClipFilter = 'all';
 let clipsCache = [];
+const selectedClipIds = new Set();
 let opusPresetsCache = [];
 let brandKitsCache = [];
 let selectedPresetId = 'think-media';
 let knownBootId = null;
 let lastSnapshot = '';
+let lastSseTick = 0;
 let toastTimer = null;
 
 function esc(value) {
@@ -182,11 +184,39 @@ function renderPipelineLive(p) {
   }
 }
 
+function handleRealtimeStatusPayload(data) {
+  if (!data || data.status === 'error') return;
+  if (data.boot_id) {
+    if (knownBootId && knownBootId !== data.boot_id) {
+      showToast('Nova versão do servidor detectada. Atualizando painel...', 'info');
+      setTimeout(() => window.location.reload(), 500);
+      return;
+    }
+    knownBootId = data.boot_id;
+  }
+  applyStatusData(data);
+  if (typeof data.experiments_count === 'number') {
+    setText('navCountExperiments', data.experiments_count);
+  }
+
+  const snap = `${data.videos_tracked}-${data.clips_total}-${data.clips_rendered}-${data.scheduled_posts}-${data.destination_channels}-${data.active_destination_channels}-${data.monitored_channels}-${data.experiments_count}-${data.state_hash || ''}`;
+  const modalOpen = Boolean(
+    document.getElementById('editPostModal')?.classList.contains('open') ||
+    document.getElementById('editClipModal')?.classList.contains('open') ||
+    document.getElementById('wordsEditorModal')?.classList.contains('open')
+  );
+  if (lastSnapshot && lastSnapshot !== snap && !dndActive && !modalOpen) {
+    refreshCurrentView();
+  }
+  lastSnapshot = snap;
+}
+
 async function fetchStatus() {
   try {
-    const res = await fetch('/api/status');
+    const res = await fetch('/api/status', { cache: 'no-store' });
+    if (!res.ok) return;
     const data = await res.json();
-    applyStatusData(data);
+    handleRealtimeStatusPayload(data);
   } catch (e) {
     console.error('Status fetch failed:', e);
   }
@@ -196,37 +226,21 @@ function startRealtimeStream() {
   const es = new EventSource('/api/events/stream');
   es.onmessage = (ev) => {
     try {
-      const data = JSON.parse(ev.data);
-      if (data.boot_id) {
-        if (knownBootId && knownBootId !== data.boot_id) {
-          showToast('Nova versão do servidor detectada. Atualizando painel...', 'info');
-          setTimeout(() => window.location.reload(), 600);
-          return;
-        }
-        knownBootId = data.boot_id;
-      }
-      applyStatusData(data);
-      if (typeof data.experiments_count === 'number') {
-        setText('navCountExperiments', data.experiments_count);
-      }
-
-      const snap = `${data.videos_tracked}-${data.clips_total}-${data.clips_rendered}-${data.scheduled_posts}-${data.destination_channels}-${data.active_destination_channels}-${data.monitored_channels}-${data.experiments_count}-${data.state_hash || ''}`;
-      const modalOpen = Boolean(
-        document.getElementById('editPostModal')?.classList.contains('open') ||
-        document.getElementById('editClipModal')?.classList.contains('open') ||
-        document.getElementById('wordsEditorModal')?.classList.contains('open')
-      );
-      if (lastSnapshot && lastSnapshot !== snap && !dndActive && !modalOpen) {
-        refreshCurrentView();
-      }
-      lastSnapshot = snap;
+      lastSseTick = Date.now();
+      handleRealtimeStatusPayload(JSON.parse(ev.data));
     } catch (e) {
       console.error('SSE parse error:', e);
     }
   };
   es.onerror = () => {
-    // EventSource reconecta automaticamente
+    // EventSource reconecta automaticamente; fallback polling cobre qualquer queda
   };
+  // Safety net: se SSE ficar >5s sem entregar tick, consulta /api/status automaticamente
+  setInterval(() => {
+    if (Date.now() - lastSseTick > 5000) {
+      fetchStatus();
+    }
+  }, 4000);
 }
 
 /* ==========================================
@@ -2479,8 +2493,6 @@ async function restoreVideoFromDrive(videoId) {
 /* ==========================================
    REGENERAÇÃO INDIVIDUAL & EM LOTE DE SEO POR SELEÇÃO
    ========================================== */
-const selectedClipIds = new Set();
-
 function updateSelectedClipsCounter() {
   setText('selectedClipsCount', `${selectedClipIds.size} selecionado(s)`);
 }
