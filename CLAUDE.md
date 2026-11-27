@@ -6,9 +6,11 @@ Este arquivo é lido automaticamente pelo **Claude Code** ao iniciar neste repos
 
 ## 🏛️ Papéis e Arquitetura de Colaboração
 
-- **Antigravity (Google DeepMind Agent):** Arquiteto Geral e Orquestrador Central. Define a visão do sistema, desenha os esquemas de banco de dados, cria as esteiras de 24/7 e distribui missões.
-- **Claude Code (Anthropic Agent):** Especialista em Refatoração, Otimização de Código, Implementação de Módulos e Testes.
-- **Open Code (Local Interpreter Agent):** Execução local e validações rápidas.
+- **Antigravity (Google DeepMind Agent):** **Arquiteto Líder & Executor Principal**.
+  - Responsável por: Estruturação e arquitetura geral, banco de dados, motor de deduplicação, esteiras 24/7, endpoints FastAPI, pipelines FFmpeg/Whisper, execução diária e orquestração de Git.
+- **Claude Code (Anthropic Agent):** **Especialista em Lógica Complexa & Tarefas Profundas**.
+  - Responsável por: Algoritmos matemáticos complexos, visão computacional avançada (auto-detecção de posição de webcam/facecam), heurísticas profundas de viralidade e refatorações de alta complexidade.
+- **Modo de Trabalho:** Sincronização contínua via Git e pasta local `/home/ldks/Documents/work-claude/`.
 
 ---
 
