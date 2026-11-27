@@ -3,13 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ClipperStudio Pro 24/7 — AI YouTube Shorts & Streamer Automation</title>
+  <title>ClipperStudio Pro 24/7 — AI YouTube Shorts Automation</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -20,77 +19,45 @@
             mono: ['"JetBrains Mono"', 'monospace'],
           },
           colors: {
-            brand: {
-              50: '#fff1f2',
-              500: '#f43f5e',
-              600: '#e11d48',
-              700: '#be123c',
-            },
-            studio: {
-              950: '#07090e',
-              900: '#0c1017',
-              850: '#111722',
-              800: '#161e2e',
-              700: '#232f45',
-              600: '#334155',
-            }
+            brand: { 50: '#fff1f2', 500: '#f43f5e', 600: '#e11d48', 700: '#be123c' },
+            studio: { 950: '#07090e', 900: '#0c1017', 850: '#111722', 800: '#161e2e', 700: '#232f45', 600: '#334155' }
           }
         }
       }
     }
   </script>
   <style>
-    /* Custom scrollbars */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #0c1017; }
     ::-webkit-scrollbar-thumb { background: #232f45; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #334155; }
-    
-    .glow-rose {
-      box-shadow: 0 0 25px -5px rgba(244, 63, 94, 0.35);
-    }
-    .glow-cyan {
-      box-shadow: 0 0 25px -5px rgba(6, 182, 212, 0.35);
-    }
-    .phone-mockup {
-      aspect-ratio: 9/16;
-      border: 6px solid #232f45;
-      border-radius: 28px;
-      overflow: hidden;
-      position: relative;
-    }
+    .glow-rose { box-shadow: 0 0 25px -5px rgba(244, 63, 94, 0.35); }
   </style>
 </head>
 <body class="bg-studio-950 text-slate-100 min-h-screen font-sans flex flex-col antialiased selection:bg-brand-500 selection:text-white">
 
   <!-- TOPBAR -->
-  <header class="border-b border-studio-800 bg-studio-900/90 backdrop-blur-md sticky top-0 z-50 px-6 py-3.5 flex items-center justify-between">
+  <header class="border-b border-studio-800 bg-studio-900/90 backdrop-blur-md sticky top-0 z-50 px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
     <div class="flex items-center space-x-4">
       <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 via-rose-600 to-amber-500 flex items-center justify-center shadow-lg shadow-brand-500/20">
         <i class="fa-solid fa-bolt-lightning text-white text-lg"></i>
       </div>
       <div>
-        <div class="flex items-center gap-2.5">
+        <div class="flex items-center gap-2.5 flex-wrap">
           <h1 class="text-base font-extrabold tracking-tight text-white">CLIPPER STUDIO PRO</h1>
           <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 uppercase tracking-wider">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span> 24/7 Autônomo
-          </span>
-          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30">
-            Deduplicação Ativa
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span> Tempo Real
           </span>
         </div>
-        <p class="text-xs text-slate-400">9 Streamers Monitorados • 4 Vídeos/Dia x 7 Dias • Antigravity + Claude Code Dual Engine</p>
+        <p class="text-xs text-slate-400">Monitoramento 24/7 • Rodízio de Streamers • Cortes 9:16 • Multicanal por %</p>
       </div>
     </div>
 
-    <div class="flex items-center space-x-3">
-      <div class="hidden md:flex items-center space-x-2 text-xs font-mono bg-studio-850 px-3 py-1.5 rounded-lg border border-studio-700/60 text-slate-400">
-        <span class="text-slate-500">MCP:</span> <span class="text-cyan-400 font-bold">READY</span>
-        <span class="text-slate-600">|</span>
-        <span class="text-slate-500">CLAUDE:</span> <span class="text-amber-400 font-bold">PAIRED</span>
-      </div>
-      <button onclick="triggerCheckChannels()" class="px-4 py-2 rounded-lg bg-studio-800 hover:bg-studio-700 text-xs font-semibold border border-studio-700 text-slate-200 transition flex items-center gap-2">
-        <i class="fa-solid fa-arrows-rotate text-brand-500"></i> Varrer 9 Canais
+    <div class="flex items-center flex-wrap gap-2.5">
+      <button onclick="triggerCheckChannels()" class="px-3.5 py-2 rounded-lg bg-studio-800 hover:bg-studio-700 text-xs font-semibold border border-studio-700 text-slate-200 transition flex items-center gap-2">
+        <i class="fa-solid fa-arrows-rotate text-brand-500"></i> Varrer Canais
+      </button>
+      <button onclick="renderAllPending()" class="px-3.5 py-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-xs font-bold border border-amber-500/40 text-amber-300 transition flex items-center gap-2">
+        <i class="fa-solid fa-film"></i> Renderizar Pendentes
       </button>
       <button onclick="triggerPipelineCycle()" class="px-4 py-2 rounded-lg bg-gradient-to-r from-brand-600 to-rose-600 hover:from-brand-500 hover:to-rose-500 text-xs font-bold text-white shadow-lg glow-rose transition flex items-center gap-2">
         <i class="fa-solid fa-play"></i> Disparar Esteira
@@ -98,105 +65,151 @@
     </div>
   </header>
 
+  <!-- LIVE PIPELINE STATUS BAR -->
+  <div class="bg-studio-900/70 border-b border-studio-800 px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+    <div class="flex items-center gap-2.5">
+      <span id="workerDot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+      <span class="text-slate-400 font-semibold">Esteira:</span>
+      <span id="workerStepText" class="font-mono text-slate-200">Conectando...</span>
+    </div>
+    <span id="workerErrorText" class="font-mono text-rose-400 truncate max-w-xl hidden"></span>
+  </div>
+
   <!-- WORKSPACE BODY -->
   <main class="flex-1 p-6 max-w-[1500px] mx-auto w-full space-y-6">
 
     <!-- KPI DASHBOARD -->
     <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
+      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl">
         <div class="flex justify-between items-center text-slate-400 mb-1">
-          <span class="text-xs font-medium uppercase tracking-wider">Canais 24/7</span>
+          <span class="text-xs font-medium uppercase tracking-wider">Canais Ativos</span>
           <i class="fa-brands fa-youtube text-brand-500"></i>
         </div>
-        <div class="text-2xl font-extrabold text-white" id="kpiChannels">9</div>
-        <div class="text-[11px] text-emerald-400 mt-1 font-medium flex items-center gap-1">
-          <i class="fa-solid fa-circle-check text-[9px]"></i> Feeds RSS Ativos
-        </div>
+        <div class="text-2xl font-extrabold text-white" id="kpiChannels">0</div>
+        <div class="text-[11px] text-emerald-400 mt-1 font-medium">Feeds RSS + yt-dlp</div>
       </div>
 
-      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
+      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl">
         <div class="flex justify-between items-center text-slate-400 mb-1">
           <span class="text-xs font-medium uppercase tracking-wider">Vídeos Indexados</span>
           <i class="fa-solid fa-layer-group text-cyan-400"></i>
         </div>
-        <div class="text-2xl font-extrabold text-white" id="kpiVideos">135</div>
-        <div class="text-[11px] text-slate-400 mt-1">Alanzoka, Paulinho, Lipao...</div>
+        <div class="text-2xl font-extrabold text-white" id="kpiVideos">0</div>
+        <div class="text-[11px] text-slate-400 mt-1">Rodízio entre streamers</div>
       </div>
 
-      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
+      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl">
         <div class="flex justify-between items-center text-slate-400 mb-1">
-          <span class="text-xs font-medium uppercase tracking-wider">Cortes Salvos</span>
+          <span class="text-xs font-medium uppercase tracking-wider">Cortes Detectados</span>
           <i class="fa-solid fa-scissors text-purple-400"></i>
         </div>
         <div class="text-2xl font-extrabold text-white" id="kpiClips">0</div>
-        <div class="text-[11px] text-purple-400 mt-1 font-medium">Anti-Sobreposição Ativa</div>
+        <div class="text-[11px] text-purple-400 mt-1 font-medium">Deduplicação Ativa</div>
       </div>
 
-      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
+      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl">
         <div class="flex justify-between items-center text-slate-400 mb-1">
-          <span class="text-xs font-medium uppercase tracking-wider">Renderizados 9:16</span>
+          <span class="text-xs font-medium uppercase tracking-wider">Prontos em Disco</span>
           <i class="fa-solid fa-film text-amber-400"></i>
         </div>
         <div class="text-2xl font-extrabold text-white" id="kpiRendered">0</div>
-        <div class="text-[11px] text-amber-400 mt-1">Gamer Split + Legenda ASS</div>
+        <div class="text-[11px] text-amber-400 mt-1">MP4 9:16 Verificado</div>
       </div>
 
-      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
+      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl">
         <div class="flex justify-between items-center text-slate-400 mb-1">
           <span class="text-xs font-medium uppercase tracking-wider">Slots Agendados</span>
           <i class="fa-solid fa-calendar-check text-rose-400"></i>
         </div>
         <div class="text-2xl font-extrabold text-white" id="kpiScheduled">0</div>
-        <div class="text-[11px] text-rose-400 mt-1 font-medium">Meta: 4/dia (28 semanais)</div>
+        <div class="text-[11px] text-rose-400 mt-1 font-medium">Realocação automática</div>
       </div>
     </div>
 
     <!-- STUDIO TABS -->
-    <div class="border-b border-studio-800 flex space-x-8 text-sm">
-      <button onclick="switchTab('channels')" id="tabBtnChannels" class="pb-3 font-bold border-b-2 border-brand-500 text-white flex items-center gap-2.5 transition">
-        <i class="fa-brands fa-youtube text-brand-500"></i> 9 Canais Monitorados
+    <div class="border-b border-studio-800 flex flex-wrap gap-6 text-sm">
+      <button onclick="switchTab('channels')" id="tabBtnChannels" class="pb-3 font-bold border-b-2 border-brand-500 text-white flex items-center gap-2 transition">
+        <i class="fa-brands fa-youtube text-brand-500"></i> Canais & URL Direta
       </button>
-      <button onclick="switchTab('calendar')" id="tabBtnCalendar" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
-        <i class="fa-regular fa-calendar-days text-amber-400"></i> Grade de 4 Vídeos/Dia (7 Dias)
+      <button onclick="switchTab('clips')" id="tabBtnClips" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2 transition">
+        <i class="fa-solid fa-scissors text-purple-400"></i> Clipes & Personalização
       </button>
-      <button onclick="switchTab('clips')" id="tabBtnClips" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
-        <i class="fa-solid fa-shield-halved text-purple-400"></i> Deduplicação & Clipes
+      <button onclick="switchTab('calendar')" id="tabBtnCalendar" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2 transition">
+        <i class="fa-regular fa-calendar-days text-amber-400"></i> Grade 7 Dias
       </button>
-      <button onclick="switchTab('timeline')" id="tabBtnTimeline" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
-        <i class="fa-solid fa-chart-gantt text-emerald-400"></i> Inspetor de Linha do Tempo
+      <button onclick="switchTab('timeline')" id="tabBtnTimeline" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2 transition">
+        <i class="fa-solid fa-chart-gantt text-emerald-400"></i> Linha do Tempo
       </button>
-      <button onclick="switchTab('aibus')" id="tabBtnAibus" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
-        <i class="fa-solid fa-terminal text-cyan-400"></i> Console Claude Code & Multi-IA
+      <button onclick="switchTab('aibus')" id="tabBtnAibus" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2 transition">
+        <i class="fa-solid fa-terminal text-cyan-400"></i> Logs ao Vivo
       </button>
-      <button onclick="switchTab('destinations')" id="tabBtnDestinations" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
-        <i class="fa-solid fa-cloud-arrow-up text-rose-500"></i> Contas & Monetização
+      <button onclick="switchTab('destinations')" id="tabBtnDestinations" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2 transition">
+        <i class="fa-solid fa-sliders text-rose-500"></i> Contas, Pesos % & Config
       </button>
     </div>
 
-    <!-- TAB 1: 9 CANAIS MONITORADOS -->
-    <section id="tabContentChannels" class="space-y-4">
-      <div class="flex justify-between items-center">
-        <div>
-          <h2 class="text-base font-bold text-white">Canais de Streamers Sob Vigilância 24 Horas</h2>
-          <p class="text-xs text-slate-400">Detecção instantânea de novos vídeos e lives sem consumo de cota da API do YouTube</p>
+    <!-- TAB 1: CANAIS & URL DIRETA -->
+    <section id="tabContentChannels" class="space-y-5">
+      <!-- PROCESSAR URL DIRETA -->
+      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-5">
+        <h2 class="text-sm font-bold text-white flex items-center gap-2 mb-3">
+          <i class="fa-solid fa-link text-brand-500"></i> Cortar Qualquer Vídeo por URL Agora
+        </h2>
+        <div class="flex flex-col md:flex-row gap-3">
+          <input id="directUrlInput" type="text" placeholder="Cole o link do YouTube (ex: https://www.youtube.com/watch?v=...)" class="flex-1 bg-studio-950 border border-studio-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-brand-500" />
+          <button onclick="processDirectUrl()" class="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-xs font-bold text-white transition flex items-center justify-center gap-2">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Baixar, Analisar e Renderizar
+          </button>
         </div>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="channelsList">
-        <!-- Preenchido via JS -->
+
+      <!-- ADICIONAR NOVO CANAL MONITORADO -->
+      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-5 space-y-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h2 class="text-sm font-bold text-white">Canais Monitorados 24/7</h2>
+            <p class="text-xs text-slate-400">Adicione, pause ou remova streamers. A esteira alterna entre todos eles automaticamente.</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <input id="newChannelName" type="text" placeholder="Nome (opcional)" class="bg-studio-950 border border-studio-700 rounded-lg px-3 py-1.5 text-xs text-white w-36" />
+            <input id="newChannelUrl" type="text" placeholder="@handle ou URL do canal" class="bg-studio-950 border border-studio-700 rounded-lg px-3 py-1.5 text-xs text-white w-56" />
+            <button onclick="addSourceChannel()" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white transition">
+              + Adicionar Canal
+            </button>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="channelsList"></div>
       </div>
     </section>
 
-    <!-- TAB 2: CALENDÁRIO 4 VÍDEOS/DIA X 7 DIAS -->
+    <!-- TAB 2: CLIPES & PERSONALIZAÇÃO -->
+    <section id="tabContentClips" class="space-y-4 hidden">
+      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6 space-y-4">
+        <div class="flex flex-wrap justify-between items-center gap-3 pb-3 border-b border-studio-800">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-scissors text-purple-400"></i> Cortes Gerados & Personalização antes do Render
+            </h2>
+            <p class="text-xs text-slate-400">Edite título, tempo (início/fim), modo 9:16 e renderize. O player aparece apenas quando o MP4 existe em disco.</p>
+          </div>
+          <button onclick="renderAllPending()" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-xs font-bold text-white transition flex items-center gap-2">
+            <i class="fa-solid fa-film"></i> Renderizar Todos Pendentes
+          </button>
+        </div>
+        <div id="clipsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      </div>
+    </section>
+
+    <!-- TAB 3: CALENDÁRIO 4 VÍDEOS/DIA X 7 DIAS -->
     <section id="tabContentCalendar" class="space-y-4 hidden">
       <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-4 border-b border-studio-800">
           <div>
             <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <i class="fa-solid fa-calendar-week text-amber-400"></i>
-              Matriz de Agendamento Semanal (28 Slots de Pico)
+              <i class="fa-solid fa-calendar-week text-amber-400"></i> Matriz Semanal (28 Slots por Canal)
             </h2>
             <p class="text-xs text-slate-400 mt-1">
-              Publicações automáticas em 4 horários de maior engajamento gamer: <strong>11:30</strong> (Almoço), <strong>15:00</strong> (Tarde), <strong>18:30</strong> (Volta do Trabalho/Escola) e <strong>21:00</strong> (Prime Time).
+              Posts vencidos não publicados são realocados automaticamente para o próximo horário vago.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2.5">
@@ -204,108 +217,74 @@
               <option value="">Canal Principal</option>
             </select>
             <button onclick="autoFillSchedule()" class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-bold text-slate-950 transition flex items-center gap-2 shadow-lg shadow-amber-500/20">
-              <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Preencher Grade Semanal
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Realocar Vencidos & Auto-Preencher
             </button>
           </div>
         </div>
         <div class="overflow-x-auto">
-          <div id="calendarGrid" class="grid grid-cols-1 md:grid-cols-7 gap-3 min-w-[900px]">
-            <!-- Renderizado dinamicamente -->
-          </div>
+          <div id="calendarGrid" class="grid grid-cols-1 md:grid-cols-7 gap-3 min-w-[900px]"></div>
         </div>
       </div>
     </section>
 
-    <!-- TAB 3: CLIPES & MEMÓRIA DE DEDUPLICAÇÃO -->
-    <section id="tabContentClips" class="space-y-4 hidden">
-      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6">
-        <div class="flex justify-between items-center mb-4">
-          <div>
-            <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <i class="fa-solid fa-database text-purple-400"></i>
-              Registro de Cortes & Proteção Anti-Duplicidade
-            </h2>
-            <p class="text-xs text-slate-400">
-              O banco de dados memoriza cada segundo já usado. Nenhum trecho é reutilizado ou postado em duplicidade.
-            </p>
-          </div>
-        </div>
-        <div id="clipsGrid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <!-- Preenchido via JS -->
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 4: INSPETOR VISUAL DE LINHA DO TEMPO -->
+    <!-- TAB 4: INSPETOR DE LINHA DO TEMPO -->
     <section id="tabContentTimeline" class="space-y-4 hidden">
       <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6 space-y-4">
         <div>
           <h2 class="text-base font-bold text-white flex items-center gap-2">
-            <i class="fa-solid fa-chart-gantt text-emerald-400"></i>
-            Inspetor de Linha do Tempo (Trechos Usados vs. Trechos Virgens)
+            <i class="fa-solid fa-chart-gantt text-emerald-400"></i> Inspetor de Linha do Tempo (Deduplicação)
           </h2>
-          <p class="text-xs text-slate-400">
-            Visualize onde estão os cortes existentes e onde a IA pode extrair novos Shorts sem sobreposição.
-          </p>
+          <p class="text-xs text-slate-400">Trechos já usados em roxo (bloqueados) vs. trechos livres em verde.</p>
         </div>
-        <div class="flex items-center gap-3">
-          <select id="videoSelectTimeline" onchange="loadVideoTimeline()" class="bg-studio-850 border border-studio-700 text-xs font-mono rounded-lg px-3 py-2 text-slate-200 w-full max-w-md">
-            <!-- Populado via JS -->
-          </select>
+        <div class="flex flex-wrap items-center gap-3">
+          <select id="videoSelectTimeline" onchange="loadVideoTimeline()" class="bg-studio-850 border border-studio-700 text-xs font-mono rounded-lg px-3 py-2 text-slate-200 w-full max-w-lg"></select>
           <button onclick="loadVideoTimeline()" class="px-3 py-2 rounded-lg bg-studio-800 hover:bg-studio-700 text-xs font-semibold text-slate-200 border border-studio-700">
-            Atualizar Gráfico
+            Atualizar
           </button>
         </div>
-        <div id="timelineContainer" class="p-4 bg-studio-950 border border-studio-800 rounded-xl space-y-4">
+        <div class="p-4 bg-studio-950 border border-studio-800 rounded-xl space-y-4">
           <div class="flex items-center justify-between text-xs text-slate-400 font-mono">
             <span>00:00 (Início)</span>
-            <span id="timelineDuration">30:00 (Fim)</span>
+            <span id="timelineDuration">--:--</span>
           </div>
-          <!-- Barra gráfica interativa -->
-          <div id="timelineBar" class="h-8 bg-emerald-500/20 border border-emerald-500/40 rounded-lg relative overflow-hidden flex items-center">
-            <!-- Blocos de corte renderizados aqui -->
-          </div>
-          <div class="flex gap-4 text-xs">
-            <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-3 rounded bg-emerald-500/30 border border-emerald-500"></span> Trecho Livre (Inédito)</span>
-            <span class="flex items-center gap-1.5 text-purple-400"><span class="w-3 h-3 rounded bg-purple-500 border border-purple-400"></span> Trecho Já Usado (Bloqueado)</span>
-          </div>
+          <div id="timelineBar" class="h-8 bg-emerald-500/20 border border-emerald-500/40 rounded-lg relative overflow-hidden flex items-center"></div>
+          <div id="timelineSegmentsList" class="text-xs space-y-1.5 text-slate-300 font-mono"></div>
         </div>
       </div>
     </section>
 
-    <!-- TAB 5: CONSOLE CLAUDE CODE & MULTI-IA -->
+    <!-- TAB 5: LOGS AO VIVO & MULTI-IA -->
     <section id="tabContentAibus" class="space-y-4 hidden">
       <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6 space-y-4">
         <div class="flex justify-between items-center">
           <div>
             <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <i class="fa-solid fa-code-compare text-cyan-400"></i>
-              Console de Orquestração Antigravity ⇄ Claude Code
+              <i class="fa-solid fa-terminal text-cyan-400"></i> Logs em Tempo Real da Esteira
             </h2>
-            <p class="text-xs text-slate-400">Eventos em tempo real, propostas de cortes e sincronização Git</p>
+            <p class="text-xs text-slate-400">Acompanhe downloads, transcrições, erros de FFmpeg e uploads ao vivo.</p>
           </div>
-          <span class="text-xs px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-mono">
-            /home/ldks/Documents/work-claude/
-          </span>
+          <button onclick="loadLiveLogs()" class="px-3 py-1.5 rounded-lg bg-studio-800 hover:bg-studio-700 text-xs font-semibold text-slate-200 border border-studio-700">
+            Atualizar Logs
+          </button>
         </div>
+        <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 font-mono text-xs max-h-80 overflow-y-auto space-y-1.5" id="pipelineLiveLogs"></div>
 
-        <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 font-mono text-xs max-h-96 overflow-y-auto space-y-2.5" id="aiBusLogs">
-          <!-- Logs renderizados via JS -->
-        </div>
+        <h3 class="text-sm font-bold text-slate-300 pt-2">Eventos do Barramento Multi-IA</h3>
+        <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 font-mono text-xs max-h-56 overflow-y-auto space-y-2" id="aiBusLogs"></div>
       </div>
     </section>
 
-    <!-- TAB 6: CONTAS & MONETIZAÇÃO (YOUTUBE OAUTH2) -->
-    <section id="tabContentDestinations" class="space-y-4 hidden">
+    <!-- TAB 6: CONTAS, PESOS % & CONFIGURAÇÕES -->
+    <section id="tabContentDestinations" class="space-y-6 hidden">
+      <!-- MULTICANAL & PESOS % -->
       <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6 space-y-5">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-studio-800">
           <div>
             <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <i class="fa-brands fa-youtube text-brand-500"></i>
-              Contas do YouTube Conectadas para Monetização
+              <i class="fa-brands fa-youtube text-brand-500"></i> Canais de Destino & Distribuição por Porcentagem (%)
             </h2>
             <p class="text-xs text-slate-400 mt-1">
-              Conecte múltiplos canais do YouTube usando OAuth 2.0 oficial. Cada canal tem seu Refresh Token próprio para envio de 4 vídeos/dia.
+              Defina de 0% a 100% para cada canal. Canais com 0% ficam pausados; a soma total deve fechar obrigatoriamente em 100%.
             </p>
           </div>
           <a href="/api/auth/youtube/login" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-xs font-bold text-white transition flex items-center gap-2 shadow-lg shadow-red-600/30">
@@ -314,25 +293,90 @@
         </div>
 
         <div id="weightsSummaryBar" class="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-studio-950 border border-studio-800 rounded-xl text-xs hidden">
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <span class="text-slate-400">Soma da Distribuição:</span>
             <span id="weightsTotalBadge" class="px-2.5 py-1 rounded-lg font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">100% / 100%</span>
-            <span id="weightsHint" class="text-slate-400 hidden">A soma deve fechar exatamente em 100% (canais com 0% ficam pausados).</span>
+            <span id="weightsHint" class="text-rose-400 hidden">Ajuste os valores para somarem exatamente 100%.</span>
           </div>
           <button id="saveWeightsBtn" onclick="saveAllWeights()" class="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold transition">
             Salvar Distribuição (%)
           </button>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="destinationsList">
-          <!-- Renderizado via JS -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="destinationsList"></div>
+      </div>
+
+      <!-- CONFIGURAÇÕES DE IA, LEGENDA E BANCO -->
+      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6 space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-studio-800">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-robot text-cyan-400"></i> Configurações de IA, Estilo de Legenda & Sistema
+            </h2>
+            <p class="text-xs text-slate-400">Escolha o provedor de IA, idioma/estilo das legendas e modo de enquadramento padrão.</p>
+          </div>
+          <button onclick="resetLocalDb()" class="px-3.5 py-2 rounded-lg bg-rose-600/20 hover:bg-rose-600/35 border border-rose-500/40 text-rose-300 text-xs font-bold transition">
+            <i class="fa-solid fa-trash-can mr-1"></i> Resetar Banco Local
+          </button>
         </div>
 
-        <div class="p-4 bg-studio-950 border border-studio-800 rounded-xl text-xs space-y-2 text-slate-400">
-          <span class="font-bold text-white flex items-center gap-1.5"><i class="fa-solid fa-circle-info text-cyan-400"></i> Como funciona a cota e os múltiplos canais:</span>
-          <p>• O YouTube concede <strong>10.000 unidades de cota gratuitas por dia</strong> no Google Cloud. Cada upload de vídeo consome 1.600 unidades (permitindo até 6 uploads diários por projeto).</p>
-          <p>• Com a meta de <strong>4 vídeos por dia por canal</strong>, 1 projeto do Google Cloud atende perfeitamente 1 a 2 canais com folga.</p>
-          <p>• Para monetizar mais canais (ex: 5 a 10 canais), basta criar projetos adicionais gratuitos no Google Cloud Console e cadastrar os tokens correspondentes no projeto.</p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+          <label class="space-y-1">
+            <span class="text-slate-400 font-semibold">Provedor de IA</span>
+            <select id="cfgAiProvider" class="w-full bg-studio-950 border border-studio-700 rounded-lg px-3 py-2 text-white">
+              <option value="local">Local Heurístico (Grátis / Sem chave)</option>
+              <option value="groq">Groq (Llama 3.3 70B)</option>
+              <option value="gemini">Google Gemini 2.0 Flash</option>
+              <option value="openai">OpenAI (GPT-4o-mini)</option>
+              <option value="ollama">Ollama (100% Local)</option>
+            </select>
+          </label>
+          <label class="space-y-1">
+            <span class="text-slate-400 font-semibold">Idioma das Legendas</span>
+            <select id="cfgSubLang" class="w-full bg-studio-950 border border-studio-700 rounded-lg px-3 py-2 text-white">
+              <option value="pt">Português (pt)</option>
+              <option value="en">Inglês (en)</option>
+              <option value="es">Espanhol (es)</option>
+            </select>
+          </label>
+          <label class="space-y-1">
+            <span class="text-slate-400 font-semibold">Modo 9:16 Padrão</span>
+            <select id="cfgCropMode" class="w-full bg-studio-950 border border-studio-700 rounded-lg px-3 py-2 text-white">
+              <option value="split_screen">Split-Screen Gamer (Facecam + Gameplay)</option>
+              <option value="blur_bg">Fundo Desfocado (Blur 9:16)</option>
+              <option value="face_tracking">Centralizado Vertical</option>
+            </select>
+          </label>
+          <label class="space-y-1">
+            <span class="text-slate-400 font-semibold">Groq API Key</span>
+            <input id="cfgGroqKey" type="password" placeholder="gsk_..." class="w-full bg-studio-950 border border-studio-700 rounded-lg px-3 py-2 text-white font-mono" />
+          </label>
+          <label class="space-y-1">
+            <span class="text-slate-400 font-semibold">Gemini API Key</span>
+            <input id="cfgGeminiKey" type="password" placeholder="AIza..." class="w-full bg-studio-950 border border-studio-700 rounded-lg px-3 py-2 text-white font-mono" />
+          </label>
+          <label class="space-y-1">
+            <span class="text-slate-400 font-semibold">OpenAI API Key</span>
+            <input id="cfgOpenaiKey" type="password" placeholder="sk-..." class="w-full bg-studio-950 border border-studio-700 rounded-lg px-3 py-2 text-white font-mono" />
+          </label>
+          <label class="space-y-1">
+            <span class="text-slate-400 font-semibold">Fonte da Legenda</span>
+            <input id="cfgSubFont" type="text" value="Arial" class="w-full bg-studio-950 border border-studio-700 rounded-lg px-3 py-2 text-white" />
+          </label>
+          <label class="space-y-1">
+            <span class="text-slate-400 font-semibold">Tamanho da Legenda</span>
+            <input id="cfgSubSize" type="number" min="28" max="120" value="72" class="w-full bg-studio-950 border border-studio-700 rounded-lg px-3 py-2 text-white font-mono" />
+          </label>
+          <label class="space-y-1">
+            <span class="text-slate-400 font-semibold">Cor de Destaque da Legenda</span>
+            <input id="cfgSubColor" type="color" value="#FFFF00" class="w-full h-9 bg-studio-950 border border-studio-700 rounded-lg px-1 py-1 cursor-pointer" />
+          </label>
+        </div>
+
+        <div class="flex justify-end">
+          <button onclick="saveSettings()" class="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-xs font-bold text-white transition">
+            Salvar Configurações
+          </button>
         </div>
       </div>
     </section>
@@ -341,16 +385,58 @@
 
   <script>
     let allVideos = [];
+    let currentActiveTab = 'channels';
+
+    function showToast(message, type = 'info') {
+      let toast = document.getElementById('globalToast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'globalToast';
+        document.body.appendChild(toast);
+      }
+      const styles = {
+        info: 'bg-studio-900 border-cyan-500/40 text-cyan-300',
+        success: 'bg-studio-900 border-emerald-500/40 text-emerald-300',
+        error: 'bg-studio-900 border-rose-500/40 text-rose-300',
+      };
+      toast.className = `fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl text-xs font-bold shadow-2xl border transition-all duration-300 ${styles[type] || styles.info}`;
+      toast.textContent = message;
+      toast.style.opacity = '1';
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 4500);
+    }
+
+    function applyStatusToUI(data) {
+      if (!data || data.status !== 'online') return;
+      document.getElementById('kpiChannels').textContent = data.monitored_channels ?? 0;
+      document.getElementById('kpiVideos').textContent = data.videos_tracked ?? 0;
+      document.getElementById('kpiClips').textContent = data.clips_total ?? 0;
+      document.getElementById('kpiRendered').textContent = data.clips_rendered ?? 0;
+      document.getElementById('kpiScheduled').textContent = data.scheduled_posts ?? 0;
+
+      const dot = document.getElementById('workerDot');
+      const stepEl = document.getElementById('workerStepText');
+      const errEl = document.getElementById('workerErrorText');
+      if (stepEl) stepEl.textContent = data.worker_step || 'Pronto';
+      if (dot) {
+        dot.className = data.worker_busy
+          ? 'w-2 h-2 rounded-full bg-amber-400 animate-ping'
+          : 'w-2 h-2 rounded-full bg-emerald-400';
+      }
+      if (errEl) {
+        if (data.worker_last_error) {
+          errEl.textContent = `Último erro: ${data.worker_last_error}`;
+          errEl.classList.remove('hidden');
+        } else {
+          errEl.classList.add('hidden');
+        }
+      }
+    }
 
     async function fetchStats() {
       try {
         const res = await fetch('/api/status');
-        const data = await res.json();
-        document.getElementById('kpiChannels').innerText = data.monitored_channels;
-        document.getElementById('kpiVideos').innerText = data.videos_tracked;
-        document.getElementById('kpiClips').innerText = data.clips_total;
-        document.getElementById('kpiRendered').innerText = data.clips_rendered;
-        document.getElementById('kpiScheduled').innerText = data.scheduled_posts;
+        applyStatusToUI(await res.json());
       } catch (e) { console.error(e); }
     }
 
@@ -360,33 +446,202 @@
         const channels = await res.json();
         const container = document.getElementById('channelsList');
         container.innerHTML = channels.map(c => `
-          <div class="bg-studio-900 border border-studio-800 rounded-2xl p-4 flex flex-col justify-between hover:border-studio-700 transition">
-            <div class="flex items-start justify-between">
+          <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 flex flex-col justify-between gap-3">
+            <div class="flex items-start justify-between gap-2">
               <div>
                 <h3 class="font-bold text-sm text-white">${c.name}</h3>
-                <span class="text-xs text-brand-500 font-mono font-medium">${c.handle}</span>
+                <span class="text-xs text-brand-500 font-mono">${c.handle}</span>
               </div>
-              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" title="Ativo 24/7"></span>
+              <button onclick="toggleSourceChannel(${c.id})" class="text-[10px] font-bold px-2 py-0.5 rounded-full border transition ${
+                c.is_active
+                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                  : 'bg-studio-800 text-slate-400 border-studio-700'
+              }">
+                ${c.is_active ? 'ATIVO' : 'PAUSADO'}
+              </button>
             </div>
-            <div class="mt-4 pt-3 border-t border-studio-800 flex items-center justify-between text-xs text-slate-400">
-              <span class="font-mono text-[11px] text-slate-300 font-semibold">${c.video_count} vídeos rastreados</span>
-              <a href="${c.url}" target="_blank" class="text-slate-400 hover:text-white transition flex items-center gap-1">
-                <i class="fa-brands fa-youtube text-brand-500"></i> YouTube
-              </a>
+            <div class="pt-3 border-t border-studio-800 flex items-center justify-between text-xs text-slate-400">
+              <span class="font-mono text-[11px] text-slate-300">${c.video_count} vídeos</span>
+              <div class="flex items-center gap-3">
+                <a href="${c.url}" target="_blank" class="hover:text-white transition"><i class="fa-brands fa-youtube text-brand-500"></i> Abrir</a>
+                <button onclick="deleteSourceChannel(${c.id})" class="text-rose-400 hover:text-rose-300 transition"><i class="fa-solid fa-trash"></i></button>
+              </div>
             </div>
           </div>
         `).join('');
       } catch (e) { console.error(e); }
     }
 
+    async function addSourceChannel() {
+      const url = document.getElementById('newChannelUrl').value.trim();
+      const name = document.getElementById('newChannelName').value.trim();
+      if (!url) { showToast('Informe o @handle ou URL do canal.', 'error'); return; }
+      showToast('Adicionando canal...', 'info');
+      const res = await fetch('/api/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, name })
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.detail || 'Erro ao adicionar canal.', 'error'); return; }
+      document.getElementById('newChannelUrl').value = '';
+      document.getElementById('newChannelName').value = '';
+      showToast(`Canal '${data.name}' adicionado!`, 'success');
+      loadChannels();
+      fetchStats();
+    }
+
+    async function toggleSourceChannel(id) {
+      const res = await fetch(`/api/channels/${id}/toggle`, { method: 'PATCH' });
+      if (res.ok) { loadChannels(); fetchStats(); }
+    }
+
+    async function deleteSourceChannel(id) {
+      if (!confirm('Remover este canal monitorado?')) return;
+      const res = await fetch(`/api/channels/${id}`, { method: 'DELETE' });
+      if (res.ok) { showToast('Canal removido.', 'success'); loadChannels(); fetchStats(); }
+    }
+
+    async function processDirectUrl() {
+      const url = document.getElementById('directUrlInput').value.trim();
+      if (!url) { showToast('Cole uma URL do YouTube primeiro!', 'error'); return; }
+      showToast('Adicionando vídeo e iniciando corte automático...', 'info');
+      const res = await fetch('/api/videos/add-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, process_now: true })
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.detail || 'Erro ao processar URL.', 'error'); return; }
+      document.getElementById('directUrlInput').value = '';
+      showToast(data.message, 'success');
+      fetchStats();
+    }
+
+    async function loadClips() {
+      try {
+        const res = await fetch('/api/clips');
+        const clips = await res.json();
+        const container = document.getElementById('clipsGrid');
+        if (!clips.length) {
+          container.innerHTML = '<p class="text-xs text-slate-400 col-span-3 py-8 text-center">Nenhum corte gerado ainda. Cole uma URL ou clique em "Disparar Esteira".</p>';
+          return;
+        }
+        container.innerHTML = clips.map(c => `
+          <div class="bg-studio-950 border border-studio-800 rounded-2xl p-4 flex flex-col justify-between gap-3">
+            <div class="space-y-2.5">
+              <div class="flex justify-between items-center gap-2">
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  Score ${c.score}/100 • ${c.channel_name}
+                </span>
+                <span class="px-2 py-0.5 rounded font-mono text-[10px] uppercase font-bold ${
+                  c.is_ready ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                }">${c.is_ready ? 'MP4 PRONTO' : c.status}</span>
+              </div>
+
+              <input id="clipTitle-${c.id}" type="text" value="${c.title.replace(/"/g, '&quot;')}" class="w-full bg-studio-900 border border-studio-800 rounded-lg px-2.5 py-1.5 text-xs font-bold text-white" />
+
+              <div class="grid grid-cols-3 gap-2 text-[11px]">
+                <label class="text-slate-400">Início (s)
+                  <input id="clipStart-${c.id}" type="number" step="0.5" value="${c.start}" class="w-full mt-0.5 bg-studio-900 border border-studio-800 rounded px-2 py-1 text-white font-mono" />
+                </label>
+                <label class="text-slate-400">Fim (s)
+                  <input id="clipEnd-${c.id}" type="number" step="0.5" value="${c.end}" class="w-full mt-0.5 bg-studio-900 border border-studio-800 rounded px-2 py-1 text-white font-mono" />
+                </label>
+                <label class="text-slate-400">Modo 9:16
+                  <select id="clipCrop-${c.id}" class="w-full mt-0.5 bg-studio-900 border border-studio-800 rounded px-1.5 py-1 text-white">
+                    <option value="split_screen" ${c.crop_mode === 'split_screen' ? 'selected' : ''}>Split</option>
+                    <option value="blur_bg" ${c.crop_mode === 'blur_bg' ? 'selected' : ''}>Blur</option>
+                    <option value="face_tracking" ${c.crop_mode === 'face_tracking' ? 'selected' : ''}>Centro</option>
+                  </select>
+                </label>
+              </div>
+
+              ${c.is_ready && c.media_url ? `
+                <div class="rounded-xl overflow-hidden border border-studio-800 bg-black">
+                  <video controls preload="metadata" class="w-full max-h-64 object-contain" src="${c.media_url}?t=${Date.now()}"></video>
+                </div>
+              ` : `
+                <div class="p-3 rounded-xl bg-studio-900/60 border border-dashed border-studio-700 text-center text-[11px] text-slate-400">
+                  MP4 ainda não renderizado em disco. Ajuste acima e clique em <strong>Renderizar 9:16</strong>.
+                </div>
+              `}
+            </div>
+
+            <div class="pt-3 border-t border-studio-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <label class="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer">
+                <input id="clipVfx-${c.id}" type="checkbox" class="rounded" /> VFX
+              </label>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <button onclick="saveClipEdits(${c.id})" class="px-2.5 py-1 rounded-lg bg-studio-800 hover:bg-studio-700 text-slate-200 font-semibold text-[11px]">Salvar</button>
+                <button onclick="renderClip(${c.id})" class="px-2.5 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-bold text-[11px]">
+                  ${c.is_ready ? 'Re-renderizar' : 'Renderizar 9:16'}
+                </button>
+                ${c.is_ready && c.media_url ? `
+                  <a href="${c.media_url}" download="short_${c.id}.mp4" class="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 font-semibold text-[11px]">MP4</a>
+                ` : ''}
+                <button onclick="deleteClip(${c.id})" class="px-2 py-1 rounded-lg bg-rose-600/20 hover:bg-rose-600/35 text-rose-400 text-[11px]" title="Excluir"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) { console.error(e); }
+    }
+
+    async function saveClipEdits(clipId) {
+      const payload = {
+        title: document.getElementById(`clipTitle-${clipId}`).value,
+        start_time: parseFloat(document.getElementById(`clipStart-${clipId}`).value),
+        end_time: parseFloat(document.getElementById(`clipEnd-${clipId}`).value),
+        crop_mode: document.getElementById(`clipCrop-${clipId}`).value,
+      };
+      const res = await fetch(`/api/clips/${clipId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.detail || 'Erro ao salvar ajustes.', 'error'); return; }
+      showToast(`Ajustes do clipe #${clipId} salvos!`, 'success');
+    }
+
+    async function renderClip(clipId) {
+      await saveClipEdits(clipId);
+      const vfx = document.getElementById(`clipVfx-${clipId}`)?.checked ? 'true' : 'false';
+      showToast(`Renderizando clipe #${clipId} via FFmpeg...`, 'info');
+      try {
+        const res = await fetch(`/api/clips/${clipId}/render?enable_vfx=${vfx}`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { showToast(data.detail || `Erro ao renderizar #${clipId}`, 'error'); return; }
+        showToast(`Clipe #${clipId} pronto (${Math.round((data.file_size_bytes || 0) / 1024)} KB)!`, 'success');
+        loadClips();
+        fetchStats();
+      } catch (e) { showToast(`Erro de rede ao renderizar #${clipId}`, 'error'); }
+    }
+
+    async function deleteClip(clipId) {
+      if (!confirm(`Excluir clipe #${clipId}?`)) return;
+      const res = await fetch(`/api/clips/${clipId}`, { method: 'DELETE' });
+      if (res.ok) { showToast(`Clipe #${clipId} excluído.`, 'success'); loadClips(); fetchStats(); }
+    }
+
+    async function renderAllPending() {
+      showToast('Iniciando renderização em lote dos clipes pendentes...', 'info');
+      const res = await fetch('/api/clips/render-all', { method: 'POST' });
+      const data = await res.json();
+      showToast(data.message || 'Renderização iniciada!', 'success');
+    }
+
     async function loadCalendar() {
       try {
         const sel = document.getElementById('calendarChannelSelect');
-        if (sel && sel.options.length <= 1) {
-          const chRes = await fetch('/api/destination-channels');
-          const destChannels = await chRes.json();
-          if (destChannels.length) {
-            sel.innerHTML = destChannels.map(ch => `<option value="${ch.id}">${ch.name} (${ch.weight ?? 0}%)</option>`).join('');
+        const prevVal = sel ? sel.value : '';
+        const chRes = await fetch('/api/destination-channels');
+        const destChannels = await chRes.json();
+        if (sel && destChannels.length) {
+          sel.innerHTML = destChannels.map(ch => `<option value="${ch.id}">${ch.name} (${ch.weight ?? 0}%)</option>`).join('');
+          if (prevVal && destChannels.some(c => String(c.id) === String(prevVal))) {
+            sel.value = prevVal;
           }
         }
         const selectedId = sel && sel.value ? `?channel_id=${sel.value}` : '';
@@ -394,10 +649,9 @@
         const data = await res.json();
         const container = document.getElementById('calendarGrid');
         if (!data.matrix) {
-          container.innerHTML = '<p class="text-xs text-slate-400 col-span-7 py-6 text-center">Nenhum canal de destino cadastrado ainda.</p>';
+          container.innerHTML = '<p class="text-xs text-slate-400 col-span-7 py-6 text-center">Nenhum canal de destino cadastrado.</p>';
           return;
         }
-
         container.innerHTML = data.matrix.map(day => `
           <div class="bg-studio-950 border border-studio-800 rounded-xl p-3 space-y-2.5">
             <div class="text-center border-b border-studio-800 pb-2">
@@ -406,26 +660,20 @@
             </div>
             <div class="space-y-2">
               ${day.slots.map(s => `
-                <div class="p-2.5 rounded-lg border text-xs transition ${
-                  s.is_filled 
-                    ? 'bg-amber-500/10 border-amber-500/40 text-amber-200' 
-                    : 'bg-studio-900 border-studio-800/80 text-slate-500'
+                <div class="p-2.5 rounded-lg border text-xs ${
+                  s.is_filled ? 'bg-amber-500/10 border-amber-500/40 text-amber-200' : 'bg-studio-900 border-studio-800/80 text-slate-500'
                 }">
                   <div class="flex justify-between items-center font-bold">
                     <span class="font-mono text-[11px]">${s.time}</span>
-                    <span class="text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                    <span class="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
                       s.is_filled ? 'bg-amber-500/20 text-amber-300' : 'bg-studio-800 text-slate-400'
-                    }">
-                      ${s.is_filled ? 'AGENDADO' : 'VAGO'}
-                    </span>
+                    }">${s.is_filled ? s.status : 'VAGO'}</span>
                   </div>
                   ${s.is_filled ? `
-                    <p class="text-[11px] font-semibold text-white mt-1.5 line-clamp-2" title="${s.clip.title}">
-                      ${s.clip.title}
-                    </p>
+                    <p class="text-[11px] font-semibold text-white mt-1.5 line-clamp-2" title="${s.clip.title}">${s.clip.title}</p>
                     <div class="flex justify-between items-center text-[10px] text-slate-400 mt-2 pt-1 border-t border-amber-500/20 font-mono">
                       <span>${s.clip.duration}s</span>
-                      <span class="text-amber-400 font-bold">Score ${s.clip.score}</span>
+                      ${s.status === 'pending' ? `<button onclick="uploadPostNow(${s.post_id})" class="text-emerald-400 hover:underline font-bold">Enviar Agora</button>` : `<span class="text-amber-400">Score ${s.clip.score}</span>`}
                     </div>
                   ` : ''}
                 </div>
@@ -436,72 +684,13 @@
       } catch (e) { console.error(e); }
     }
 
-    async function loadClips() {
-      try {
-        const res = await fetch('/api/clips');
-        const clips = await res.json();
-        const container = document.getElementById('clipsGrid');
-        if (!clips.length) {
-          container.innerHTML = '<p class="text-xs text-slate-400 col-span-3 py-8 text-center">Nenhum clipe gerado ainda. Clique em "Disparar Esteira" para processar o primeiro vídeo.</p>';
-          return;
-        }
-        container.innerHTML = clips.map(c => `
-          <div class="bg-studio-950 border border-studio-800 rounded-2xl p-4 flex flex-col justify-between hover:border-studio-700 transition gap-3">
-            <div>
-              <div class="flex justify-between items-start mb-2">
-                <span class="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                  Score ${c.score}/100
-                </span>
-                <span class="text-[11px] text-slate-400 font-mono">${c.start}s - ${c.end}s (${c.duration}s)</span>
-              </div>
-              <h4 class="font-bold text-sm text-white line-clamp-2 mt-1">${c.title}</h4>
-              <p class="text-xs text-slate-400 mt-1 line-clamp-2 italic">"${c.hook || 'Momento de alta retenção'}"</p>
-              ${c.media_url ? `
-                <div class="mt-3 rounded-xl overflow-hidden border border-studio-800 bg-black">
-                  <video controls preload="metadata" class="w-full max-h-64 object-contain" src="${c.media_url}"></video>
-                </div>
-              ` : ''}
-            </div>
-            <div class="pt-3 border-t border-studio-800 flex flex-wrap justify-between items-center gap-2 text-xs">
-              <span class="text-slate-400">Por: <strong class="text-cyan-400">${c.suggested_by}</strong></span>
-              <div class="flex items-center gap-2">
-                ${c.status === 'analyzed' ? `
-                  <button onclick="renderClip(${c.id})" class="px-2.5 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-bold text-[11px] transition">
-                    Renderizar 9:16
-                  </button>
-                ` : ''}
-                ${c.media_url ? `
-                  <a href="${c.media_url}" download="short_${c.id}.mp4" class="px-2.5 py-1 rounded-lg bg-studio-800 hover:bg-studio-700 text-slate-200 font-semibold text-[11px] transition">
-                    Baixar MP4
-                  </a>
-                ` : ''}
-                <span class="px-2 py-0.5 rounded font-mono text-[10px] uppercase font-bold ${
-                  c.status === 'rendered' || c.status === 'scheduled' || c.status === 'published'
-                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                    : 'bg-studio-800 text-slate-300'
-                }">${c.status}</span>
-              </div>
-            </div>
-          </div>
-        `).join('');
-      } catch (e) { console.error(e); }
-    }
-
-    async function renderClip(clipId) {
-      showToast(`Renderizando clipe #${clipId} em 9:16...`, 'info');
-      try {
-        const res = await fetch(`/api/clips/${clipId}/render`, { method: 'POST' });
-        const data = await res.json();
-        if (!res.ok) {
-          showToast(data.detail || `Erro ao renderizar clipe #${clipId}`, 'error');
-          return;
-        }
-        showToast(`Clipe #${clipId} renderizado com sucesso!`, 'success');
-        loadClips();
-        fetchStats();
-      } catch (e) {
-        showToast(`Erro de rede ao renderizar clipe #${clipId}`, 'error');
-      }
+    async function uploadPostNow(postId) {
+      showToast(`Enviando post #${postId}...`, 'info');
+      const res = await fetch(`/api/scheduler/posts/${postId}/upload-now`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.detail || 'Erro ao enviar post.', 'error'); return; }
+      showToast(data.message || 'Post enviado com sucesso!', 'success');
+      loadCalendar();
     }
 
     async function loadVideosForTimeline() {
@@ -509,42 +698,68 @@
         const res = await fetch('/api/videos');
         allVideos = await res.json();
         const sel = document.getElementById('videoSelectTimeline');
-        sel.innerHTML = allVideos.map(v => `
-          <option value="${v.id}">${v.title.slice(0, 45)}... (${v.channel_name})</option>
-        `).join('');
-        if (allVideos.length) {
-          loadVideoTimeline();
+        if (!allVideos.length) {
+          sel.innerHTML = '<option value="">Nenhum vídeo rastreado ainda</option>';
+          return;
         }
+        sel.innerHTML = allVideos.map(v => `<option value="${v.id}">[${v.status}] ${v.title.slice(0, 50)} (${v.channel_name})</option>`).join('');
+        loadVideoTimeline();
       } catch (e) { console.error(e); }
     }
 
     async function loadVideoTimeline() {
       const vidId = document.getElementById('videoSelectTimeline').value;
       if (!vidId) return;
-
       try {
         const res = await fetch(`/api/videos/${vidId}/timeline`);
         const data = await res.json();
-        const totalDuration = data.duration || 1800;
-
-        document.getElementById('timelineDuration').innerText = `${Math.floor(totalDuration/60)}:${Math.floor(totalDuration%60).toString().padStart(2, '0')}`;
+        const totalDuration = data.duration > 0 ? data.duration : 1;
+        document.getElementById('timelineDuration').textContent = data.duration > 0
+          ? `${Math.floor(data.duration / 60)}:${Math.floor(data.duration % 60).toString().padStart(2, '0')} (${data.status})`
+          : `Ainda não baixado (${data.status})`;
 
         const bar = document.getElementById('timelineBar');
         bar.innerHTML = '';
-
-        // Renderiza blocos usados
-        data.used_segments.forEach(seg => {
-          const leftPct = (seg.start_time / totalDuration) * 100;
-          const widthPct = ((seg.end_time - seg.start_time) / totalDuration) * 100;
+        (data.used_segments || []).forEach(seg => {
+          const leftPct = Math.min(100, (seg.start_time / totalDuration) * 100);
+          const widthPct = Math.min(100 - leftPct, ((seg.end_time - seg.start_time) / totalDuration) * 100);
           const block = document.createElement('div');
           block.className = 'absolute h-full bg-purple-500 hover:bg-purple-400 transition cursor-pointer';
           block.style.left = `${leftPct}%`;
-          block.style.width = `${Math.max(widthPct, 1)}%`;
-          block.title = `Corte #${seg.id}: ${seg.title} (${seg.start_time}s - ${seg.end_time}s)`;
+          block.style.width = `${Math.max(widthPct, 1.5)}%`;
+          block.title = `#${seg.id}: ${seg.title} (${seg.start_time}s - ${seg.end_time}s)`;
           bar.appendChild(block);
         });
 
+        const list = document.getElementById('timelineSegmentsList');
+        if (!data.used_segments?.length) {
+          list.innerHTML = '<p class="text-slate-500">Nenhum trecho cortado ainda neste vídeo.</p>';
+        } else {
+          list.innerHTML = data.used_segments.map(s =>
+            `<div class="p-2 rounded bg-studio-900 border border-studio-800 flex justify-between"><span>#${s.id} ${s.title}</span><span class="text-purple-400">${s.start_time}s - ${s.end_time}s (${s.status})</span></div>`
+          ).join('');
+        }
       } catch (e) { console.error(e); }
+    }
+
+    async function loadLiveLogs() {
+      try {
+        const res = await fetch('/api/pipeline/logs');
+        const data = await res.json();
+        const el = document.getElementById('pipelineLiveLogs');
+        if (!data.logs || !data.logs.length) {
+          el.innerHTML = '<span class="text-slate-500">// Nenhum log ainda. Clique em "Disparar Esteira" ou cole uma URL.</span>';
+        } else {
+          el.innerHTML = data.logs.map(l => `
+            <div class="flex gap-2 ${l.level === 'error' ? 'text-rose-400' : 'text-slate-300'}">
+              <span class="text-slate-500">[${l.time}]</span>
+              <span class="uppercase font-bold ${l.level === 'error' ? 'text-rose-500' : 'text-emerald-400'}">${l.level}</span>
+              <span class="flex-1 break-all">${l.message}</span>
+            </div>
+          `).join('');
+        }
+      } catch (e) { console.error(e); }
+      loadAIBusEvents();
     }
 
     async function loadAIBusEvents() {
@@ -553,15 +768,14 @@
         const events = await res.json();
         const container = document.getElementById('aiBusLogs');
         if (!events.length) {
-          container.innerHTML = '<span class="text-slate-500">// Aguardando novos eventos...</span>';
+          container.innerHTML = '<span class="text-slate-500">// Nenhum evento no barramento Multi-IA.</span>';
           return;
         }
         container.innerHTML = events.map(e => `
-          <div class="p-2.5 rounded-lg bg-studio-900/60 border border-studio-800 flex items-start gap-2.5">
+          <div class="p-2 rounded-lg bg-studio-900/60 border border-studio-800 flex items-start gap-2">
             <span class="text-cyan-400 font-bold">[${e.sender} &rarr; ${e.target}]</span>
             <span class="text-amber-400 font-semibold">${e.type}</span>
-            <span class="text-slate-300 flex-1 truncate font-mono text-[11px]">${JSON.stringify(e.payload)}</span>
-            <span class="text-slate-500 text-[10px] font-mono">${e.created_at ? e.created_at.split('T')[1].slice(0, 8) : ''}</span>
+            <span class="text-slate-300 flex-1 truncate text-[11px]">${JSON.stringify(e.payload)}</span>
           </div>
         `).join('');
       } catch (e) { console.error(e); }
@@ -580,26 +794,28 @@
         }
         summaryBar.classList.remove('hidden');
         container.innerHTML = channels.map(c => `
-          <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 flex flex-col justify-between">
-            <div class="flex items-start justify-between">
+          <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 flex flex-col justify-between gap-3">
+            <div class="flex items-start justify-between gap-2">
               <div>
                 <h3 class="font-bold text-sm text-white">${c.name}</h3>
-                <span class="text-xs text-slate-400 font-mono">ID: ${c.youtube_channel_id || 'ID Pendente de Auth'}</span>
+                <span class="text-xs text-slate-400 font-mono">ID: ${c.youtube_channel_id || 'Modo Simulação'}</span>
               </div>
-              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                c.has_token 
-                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' 
-                  : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-              }">
-                ${c.has_token ? 'TOKEN ATIVO (OAuth)' : 'SIMULAÇÃO / SEM TOKEN'}
-              </span>
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  c.has_token ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                }">${c.has_token ? 'OAUTH ATIVO' : 'SEM TOKEN'}</span>
+                <button onclick="toggleDestination(${c.id})" class="text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                  c.is_active ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' : 'bg-studio-800 text-slate-400 border-studio-700'
+                }">${c.is_active ? 'ON' : 'OFF'}</button>
+                <button onclick="deleteDestination(${c.id})" class="text-rose-400 hover:text-rose-300 px-1.5"><i class="fa-solid fa-trash"></i></button>
+              </div>
             </div>
-            <div class="mt-4 pt-3 border-t border-studio-800 text-xs text-slate-400 flex flex-wrap justify-between items-center gap-2">
-              <span>Limite: <strong class="text-white">${c.daily_post_limit} vídeos/dia</strong></span>
+            <div class="pt-3 border-t border-studio-800 text-xs text-slate-400 flex flex-wrap justify-between items-center gap-2">
+              <span>Limite: <strong class="text-white">${c.daily_post_limit}/dia</strong></span>
               <div class="flex items-center gap-1.5">
                 <span>Peso:</span>
                 <input data-channel-id="${c.id}" id="weightInput-${c.id}" type="number" min="0" max="100" value="${c.weight ?? 0}" oninput="updateWeightSummary()" class="weight-input w-16 bg-studio-900 border border-studio-700 rounded px-1.5 py-0.5 text-white text-center font-mono" />
-                <span class="text-slate-400 font-mono">%</span>
+                <span class="font-mono">%</span>
               </div>
               <span class="font-mono text-rose-400">${c.scheduled_count} agendados</span>
             </div>
@@ -607,6 +823,7 @@
         `).join('');
         updateWeightSummary();
       } catch (e) { console.error(e); }
+      loadSettings();
     }
 
     function updateWeightSummary() {
@@ -632,38 +849,79 @@
       const inputs = Array.from(document.querySelectorAll('.weight-input'));
       const weights = {};
       for (const el of inputs) {
-        const cid = el.getAttribute('data-channel-id');
-        weights[cid] = Math.max(0, Math.min(100, parseInt(el.value || '0', 10) || 0));
+        weights[el.getAttribute('data-channel-id')] = Math.max(0, Math.min(100, parseInt(el.value || '0', 10) || 0));
       }
-      try {
-        const res = await fetch('/api/destination-channels/weights', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ weights })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          alert(data.detail || 'Erro ao salvar distribuição.');
-          return;
-        }
-        loadDestinations();
-      } catch (e) { console.error(e); }
+      const res = await fetch('/api/destination-channels/weights', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weights })
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.detail || 'Erro ao salvar distribuição.', 'error'); return; }
+      showToast('Distribuição (%) salva com sucesso!', 'success');
+      loadDestinations();
     }
 
     async function toggleDestination(channelId) {
+      const res = await fetch(`/api/destination-channels/${channelId}/toggle`, { method: 'PATCH' });
+      if (res.ok) { showToast('Canal atualizado!', 'success'); loadDestinations(); }
+    }
+
+    async function deleteDestination(channelId) {
+      if (!confirm('Remover este canal de destino?')) return;
+      const res = await fetch(`/api/destination-channels/${channelId}`, { method: 'DELETE' });
+      if (res.ok) { showToast('Canal de destino removido.', 'success'); loadDestinations(); fetchStats(); }
+    }
+
+    async function loadSettings() {
       try {
-        const res = await fetch(`/api/destination-channels/${channelId}/toggle`, { method: 'PATCH' });
-        if (res.ok) {
-          showToast('Status do canal atualizado!', 'success');
-          loadDestinations();
-        }
+        const res = await fetch('/api/settings');
+        const cfg = await res.json();
+        if (cfg.AI_PROVIDER) document.getElementById('cfgAiProvider').value = cfg.AI_PROVIDER;
+        if (cfg.SUBTITLE_LANGUAGE) document.getElementById('cfgSubLang').value = cfg.SUBTITLE_LANGUAGE;
+        if (cfg.CROP_MODE) document.getElementById('cfgCropMode').value = cfg.CROP_MODE;
+        document.getElementById('cfgGroqKey').value = cfg.GROQ_API_KEY || '';
+        document.getElementById('cfgGeminiKey').value = cfg.GEMINI_API_KEY || '';
+        document.getElementById('cfgOpenaiKey').value = cfg.OPENAI_API_KEY || '';
+        document.getElementById('cfgSubFont').value = cfg.SUBTITLE_FONT || 'Arial';
+        document.getElementById('cfgSubSize').value = cfg.SUBTITLE_SIZE || '72';
+        document.getElementById('cfgSubColor').value = cfg.SUBTITLE_COLOR || '#FFFF00';
       } catch (e) { console.error(e); }
     }
 
-    let currentActiveTab = 'channels';
+    async function saveSettings() {
+      const payload = {
+        AI_PROVIDER: document.getElementById('cfgAiProvider').value,
+        SUBTITLE_LANGUAGE: document.getElementById('cfgSubLang').value,
+        CROP_MODE: document.getElementById('cfgCropMode').value,
+        GROQ_API_KEY: document.getElementById('cfgGroqKey').value.trim(),
+        GEMINI_API_KEY: document.getElementById('cfgGeminiKey').value.trim(),
+        OPENAI_API_KEY: document.getElementById('cfgOpenaiKey').value.trim(),
+        SUBTITLE_FONT: document.getElementById('cfgSubFont').value.trim() || 'Arial',
+        SUBTITLE_SIZE: document.getElementById('cfgSubSize').value || '72',
+        SUBTITLE_COLOR: document.getElementById('cfgSubColor').value || '#FFFF00',
+      };
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      showToast(data.message || 'Configurações salvas!', res.ok ? 'success' : 'error');
+    }
+
+    async function resetLocalDb() {
+      if (!confirm('Tem certeza que deseja ZERAR o banco de dados local? Todos os vídeos/clipes cadastrados serão apagados e os 9 canais iniciais serão recriados.')) return;
+      const res = await fetch('/api/admin/reset-db', { method: 'POST' });
+      const data = await res.json();
+      showToast(data.message || 'Banco resetado!', res.ok ? 'success' : 'error');
+      fetchStats();
+      refreshActiveTab();
+    }
+
     function switchTab(tab) {
       currentActiveTab = tab;
-      ['channels', 'calendar', 'clips', 'timeline', 'aibus', 'destinations'].forEach(t => {
+      ['channels', 'clips', 'calendar', 'timeline', 'aibus', 'destinations'].forEach(t => {
         const btn = document.getElementById('tabBtn' + t.charAt(0).toUpperCase() + t.slice(1));
         const content = document.getElementById('tabContent' + t.charAt(0).toUpperCase() + t.slice(1));
         if (!btn || !content) return;
@@ -685,43 +943,23 @@
       if (currentActiveTab === 'calendar') loadCalendar();
       if (currentActiveTab === 'clips') loadClips();
       if (currentActiveTab === 'timeline') loadVideosForTimeline();
-      if (currentActiveTab === 'aibus') loadAIBusEvents();
+      if (currentActiveTab === 'aibus') loadLiveLogs();
       if (currentActiveTab === 'destinations') loadDestinations();
     }
 
-    function showToast(message, type = 'info') {
-      let toast = document.getElementById('globalToast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'globalToast';
-        toast.className = 'fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl text-xs font-bold shadow-2xl border transition-all duration-300';
-        document.body.appendChild(toast);
-      }
-      const styles = {
-        info: 'bg-studio-900 border-cyan-500/40 text-cyan-300',
-        success: 'bg-studio-900 border-emerald-500/40 text-emerald-300',
-        error: 'bg-studio-900 border-rose-500/40 text-rose-300',
-      };
-      toast.className = `fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl text-xs font-bold shadow-2xl border transition-all duration-300 ${styles[type] || styles.info}`;
-      toast.textContent = message;
-      toast.style.opacity = '1';
-      clearTimeout(window._toastTimer);
-      window._toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 4000);
-    }
-
     async function triggerCheckChannels() {
-      showToast('Verificando novos vídeos nos canais...', 'info');
+      showToast('Varrendo canais ativos...', 'info');
       const res = await fetch('/api/channels/check-now', { method: 'POST' });
       const data = await res.json();
-      showToast(data.message || 'Canais verificados!', 'success');
+      showToast(data.message || 'Varredura concluída!', 'success');
       fetchStats();
       loadChannels();
     }
 
     async function triggerPipelineCycle() {
-      showToast('Esteira disparada em segundo plano! Acompanhe os números em tempo real.', 'info');
+      showToast('Esteira disparada! Acompanhe o status ao vivo na barra superior.', 'info');
       await fetch('/api/pipeline/run-cycle', { method: 'POST' });
-      setTimeout(() => { fetchStats(); refreshActiveTab(); }, 3000);
+      setTimeout(() => { fetchStats(); refreshActiveTab(); }, 2500);
     }
 
     async function autoFillSchedule() {
@@ -732,7 +970,7 @@
       fetchStats();
     }
 
-    // Conexão em tempo real (SSE) + Auto-reload automático quando houver git pull
+    // SSE Tempo Real + Auto-Reload automático após git pull
     let knownBootId = null;
     let lastSnapshot = '';
     function startRealtimeStream() {
@@ -742,32 +980,23 @@
           const data = JSON.parse(ev.data);
           if (data.boot_id) {
             if (knownBootId && knownBootId !== data.boot_id) {
-              showToast('Nova atualização detectada! Recarregando painel...', 'info');
+              showToast('Nova versão detectada após git pull! Recarregando...', 'info');
               setTimeout(() => window.location.reload(), 600);
               return;
             }
             knownBootId = data.boot_id;
           }
-          if (data.status === 'online') {
-            document.getElementById('statChannels').textContent = data.monitored_channels;
-            document.getElementById('statVideos').textContent = data.videos_tracked;
-            document.getElementById('statClips').textContent = `${data.clips_rendered} / ${data.clips_total}`;
-            document.getElementById('statScheduled').textContent = data.scheduled_posts;
-            document.getElementById('statDestinations').textContent = data.destination_channels;
-            const snap = `${data.videos_tracked}-${data.clips_total}-${data.clips_rendered}-${data.scheduled_posts}-${data.destination_channels}`;
-            if (lastSnapshot && lastSnapshot !== snap) {
-              refreshActiveTab();
-            }
-            lastSnapshot = snap;
+          applyStatusToUI(data);
+          const snap = `${data.videos_tracked}-${data.clips_total}-${data.clips_rendered}-${data.scheduled_posts}-${data.destination_channels}-${data.worker_step}`;
+          if (lastSnapshot && lastSnapshot !== snap) {
+            if (currentActiveTab === 'aibus') loadLiveLogs();
+            else if (currentActiveTab !== 'destinations' && currentActiveTab !== 'clips') refreshActiveTab();
           }
+          lastSnapshot = snap;
         } catch (e) { console.error(e); }
-      };
-      es.onerror = () => {
-        // Quando o servidor reinicia após git pull, o EventSource reconecta automaticamente e detecta o novo boot_id
       };
     }
 
-    // Inicialização
     fetchStats();
     loadChannels();
     startRealtimeStream();

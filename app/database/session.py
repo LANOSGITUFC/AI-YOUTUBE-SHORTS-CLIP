@@ -88,7 +88,7 @@ def init_db():
         with engine.begin() as conn:
             cols = [row[1] for row in conn.execute(text("PRAGMA table_info(destination_channels)")).fetchall()]
             if cols and "weight" not in cols:
-                conn.execute(text("ALTER TABLE destination_channels ADD COLUMN weight INTEGER NOT NULL DEFAULT 1"))
+                conn.execute(text("ALTER TABLE destination_channels ADD COLUMN weight INTEGER NOT NULL DEFAULT 100"))
     
     with SessionLocal() as db:
         # Seed Source Channels
@@ -114,6 +114,7 @@ def init_db():
                 name="Canal Monetização #1 - Clips BR",
                 youtube_channel_id="",
                 daily_post_limit=4,
+                weight=100,
                 posting_times=json.dumps(["11:30", "15:00", "18:30", "21:00"]),
                 affiliate_comment="🔥 Inscreva-se no canal para os melhores cortes todos os dias! Link com desconto nos comentários fixados.",
                 default_tags="#shorts,#gaming,#clips,#engracado,#alanzoka,#paulonholoko",
@@ -123,7 +124,17 @@ def init_db():
 
         # Seed System Settings
         default_settings = [
-            ("AI_PROVIDER", "gemini", "Provedor padrão de IA (gemini, groq, openai, ollama, claude)"),
+            ("AI_PROVIDER", "local", "Provedor padrão de IA (local, gemini, groq, openai, ollama)"),
+            ("GROQ_API_KEY", "", "Chave de API Groq (opcional)"),
+            ("GEMINI_API_KEY", "", "Chave de API Google Gemini (opcional)"),
+            ("OPENAI_API_KEY", "", "Chave de API OpenAI (opcional)"),
+            ("OLLAMA_URL", "http://localhost:11434", "URL do servidor Ollama local"),
+            ("OLLAMA_MODEL", "llama3.1", "Modelo do Ollama local"),
+            ("SUBTITLE_LANGUAGE", "pt", "Idioma padrão das legendas (pt, en, es)"),
+            ("SUBTITLE_FONT", "Arial", "Fonte das legendas .ass"),
+            ("SUBTITLE_SIZE", "72", "Tamanho da fonte das legendas"),
+            ("SUBTITLE_COLOR", "#FFFF00", "Cor de destaque das legendas (#RRGGBB)"),
+            ("SUBTITLE_MARGIN_V", "480", "Altura vertical da legenda no vídeo 9:16"),
             ("WHISPER_MODEL", "base", "Modelo local de transcrição faster-whisper (tiny, base, small, medium)"),
             ("CROP_MODE", "split_screen", "Modo padrão de corte 9:16 (split_screen, face_tracking, blur_bg)"),
             ("MAX_CLIP_DURATION", "58", "Duração máxima do Short em segundos (máximo 60)"),

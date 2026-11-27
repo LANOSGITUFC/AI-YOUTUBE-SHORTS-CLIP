@@ -24,10 +24,16 @@ class WhisperTranscriber:
         self._faster_whisper_model = None
         os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
 
-    def transcribe_video(self, video_id: str, language: str = "pt") -> Dict[str, Any]:
+    def transcribe_video(self, video_id: str, language: Optional[str] = None) -> Dict[str, Any]:
+        from app.database.models import SystemSetting
+
         video = self.db.query(SourceVideo).filter(SourceVideo.id == video_id).first()
         if not video:
             raise ValueError(f"Vídeo {video_id} não encontrado.")
+
+        if not language:
+            lang_setting = self.db.query(SystemSetting).filter(SystemSetting.key == "SUBTITLE_LANGUAGE").first()
+            language = (lang_setting.value.strip() if lang_setting and lang_setting.value else "pt")
 
         transcript_output_path = os.path.join(TRANSCRIPTS_DIR, f"{video_id}.json")
 
@@ -36,7 +42,7 @@ class WhisperTranscriber:
             self.db.commit()
 
             # 1. TENTA PRIMEIRO EXTRAÇÃO DIRETA DO YOUTUBE (Word-Level JSON3 em 1 segundo!)
-            yt_res = self._extract_youtube_subtitles(video_id, video.url)
+            yt_res = self._extract_youtube_subtitles(video_id, video.url, language=language)
             if yt_res and yt_res.get("segments"):
                 with open(transcript_output_path, "w", encoding="utf-8") as f:
                     json.dump(yt_res, f, indent=2, ensure_ascii=False)
@@ -97,13 +103,12 @@ class WhisperTranscriber:
                     self.db.commit()
                     return result
             except ImportError:
-                pass # faster-whisper não instalado nesta versão do Python (ex: Python 3.15)
+                pass # faster-whisper não instalado nesta versão do Python
 
             # 3. SE NÃO HOUVER LEGENDA E NEM MODELO LOCAL, CRIA SEGMENTO VIRTUAL POR DURAÇÃO
-            # Permite que o pipeline continue mesmo sem Whisper local!
             fallback_res = {
                 "video_id": video_id,
-                "language": "pt",
+                "language": language,
                 "language_probability": 1.0,
                 "duration": video.duration_seconds,
                 "full_text": video.title,
@@ -111,7 +116,7 @@ class WhisperTranscriber:
                     {
                         "id": 1,
                         "start": 10.0,
-                        "end": min(55.0, video.duration_seconds),
+                        "end": min(55.0, video.duration_seconds or 55.0),
                         "text": video.title,
                         "words": [
                             {"word": w, "start": 10.0 + idx * 0.5, "end": 10.4 + idx * 0.5, "probability": 0.99}
@@ -134,17 +139,20 @@ class WhisperTranscriber:
             self.db.commit()
             raise e
 
-    def _extract_youtube_subtitles(self, video_id: str, video_url: str) -> Optional[Dict[str, Any]]:
+    def _extract_youtube_subtitles(self, video_id: str, video_url: str, language: str = "pt") -> Optional[Dict[str, Any]]:
         """
         Extrai legendas oficiais do YouTube com timestamps por palavra usando yt-dlp em formato json3.
-        Super rápido, não requer modelo local e funciona em qualquer sistema operacional!
         """
+        import glob
+        from app.services.downloader import get_ytdlp_extra_args
+
         temp_base = os.path.join(TRANSCRIPTS_DIR, f"yt_sub_{video_id}")
         cmd = [
             "yt-dlp",
-            "--js-runtimes", "node",
+            *get_ytdlp_extra_args(),
+            "--write-sub",
             "--write-auto-sub",
-            "--sub-lang", "pt",
+            "--sub-lang", f"{language},{language}-BR,pt,en",
             "--sub-format", "json3",
             "--skip-download",
             "-o", temp_base,
@@ -152,9 +160,10 @@ class WhisperTranscriber:
         ]
 
         try:
-            subprocess.run(cmd, capture_output=True, timeout=20)
-            json3_file = f"{temp_base}.pt.json3"
-            if not os.path.exists(json3_file):
+            subprocess.run(cmd, capture_output=True, timeout=30)
+            candidates = [f"{temp_base}.{language}.json3"] + sorted(glob.glob(f"{temp_base}.*.json3"))
+            json3_file = next((p for p in candidates if os.path.exists(p)), None)
+            if not json3_file:
                 return None
 
             with open(json3_file, "r", encoding="utf-8") as f:

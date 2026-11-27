@@ -117,16 +117,22 @@ class PostScheduler:
         if not active_channels:
             return 0
 
+        import os
         from collections import defaultdict, deque
         from sqlalchemy.orm import joinedload
 
-        unassigned_clips = (
+        raw_unassigned = (
             self.db.query(ClipSegment)
             .options(joinedload(ClipSegment.video))
             .filter(ClipSegment.status == "rendered")
             .order_by(ClipSegment.virality_score.desc())
             .all()
         )
+        # Se clip_path estiver preenchido, garante que o arquivo MP4 exista em disco
+        unassigned_clips = [
+            c for c in raw_unassigned
+            if (c.clip_path is None) or (os.path.exists(c.clip_path) and os.path.getsize(c.clip_path) > 0)
+        ]
 
         # Agrupa por streamer (channel_id de origem) e intercala 1 de cada por rodada
         by_streamer: Dict[str, deque] = defaultdict(deque)

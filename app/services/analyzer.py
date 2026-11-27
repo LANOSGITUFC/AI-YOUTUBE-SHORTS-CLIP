@@ -105,7 +105,21 @@ class HighlightAnalyzer:
                 )
                 saved_clips.append(seg)
 
+        # Aplica crop_mode padrão das configurações
+        crop_setting = self.db.query(SystemSetting).filter(SystemSetting.key == "CROP_MODE").first()
+        default_crop = crop_setting.value if crop_setting and crop_setting.value else "split_screen"
+        for seg in saved_clips:
+            seg.crop_mode = default_crop
+
+        video.status = "processed"
+        self.db.commit()
         return saved_clips
+
+    def _get_setting(self, key: str, default: str = "") -> str:
+        row = self.db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        if row and row.value:
+            return row.value.strip()
+        return os.getenv(key, default).strip()
 
     def _detect_viral_candidates(
         self,
@@ -115,29 +129,41 @@ class HighlightAnalyzer:
         target_clips: int = 7
     ) -> List[Dict[str, Any]]:
         """
-        Detecta candidatos via LLM (se API key configurada) ou heurística de picos emocionais.
+        Detecta candidatos via LLM configurada (Groq, Gemini, OpenAI, Ollama)
+        ou fallback local heurístico de picos emocionais.
         """
-        gemini_key = os.getenv("GEMINI_API_KEY")
-        openai_key = os.getenv("OPENAI_API_KEY")
-        groq_key = os.getenv("GROQ_API_KEY")
+        provider = self._get_setting("AI_PROVIDER", "local").lower()
+        groq_key = self._get_setting("GROQ_API_KEY")
+        gemini_key = self._get_setting("GEMINI_API_KEY")
+        openai_key = self._get_setting("OPENAI_API_KEY")
+        ollama_url = self._get_setting("OLLAMA_URL", "http://localhost:11434")
 
         segments = transcript_data.get("segments", [])
         if not segments:
             return []
 
-        # Se houver chave Groq (super rápido e gratuito)
-        if groq_key:
-            return self._call_groq_llm(video.title, segments, available_windows, groq_key)
+        llm_candidates: List[Dict[str, Any]] = []
+        try:
+            if provider == "groq" and groq_key:
+                llm_candidates = self._call_groq_llm(video.title, segments, available_windows, groq_key, target_clips)
+            elif provider == "gemini" and gemini_key:
+                llm_candidates = self._call_gemini_llm(video.title, segments, available_windows, gemini_key, target_clips)
+            elif provider == "openai" and openai_key:
+                llm_candidates = self._call_openai_llm(video.title, segments, available_windows, openai_key, target_clips)
+            elif provider == "ollama":
+                llm_candidates = self._call_ollama_llm(video.title, segments, available_windows, ollama_url, target_clips)
+            elif groq_key:
+                llm_candidates = self._call_groq_llm(video.title, segments, available_windows, groq_key, target_clips)
+            elif gemini_key:
+                llm_candidates = self._call_gemini_llm(video.title, segments, available_windows, gemini_key, target_clips)
+            elif openai_key:
+                llm_candidates = self._call_openai_llm(video.title, segments, available_windows, openai_key, target_clips)
+        except Exception:
+            llm_candidates = []
 
-        # Se houver chave Gemini
-        if gemini_key:
-            return self._call_gemini_llm(video.title, segments, available_windows, gemini_key)
+        if llm_candidates:
+            return llm_candidates[:target_clips]
 
-        # Se houver chave OpenAI
-        if openai_key:
-            return self._call_openai_llm(video.title, segments, available_windows, openai_key)
-
-        # Fallback local de alta precisão: Heurística de Palavras-Chave e Gatilhos Gamers BR
         return self._heuristic_gaming_detector(video.title, segments, available_windows, target_clips=target_clips)
 
     def _heuristic_gaming_detector(
@@ -148,8 +174,7 @@ class HighlightAnalyzer:
         target_clips: int = 7
     ) -> List[Dict[str, Any]]:
         """
-        Detector algorítmico local baseado em gatilhos de streamers brasileiros
-        (gritos, risadas, palavrões, espanto, bordões de Alanzoka, Coringa, Paulinho Loko, Edu).
+        Detector algorítmico local baseado em gatilhos de streamers brasileiros.
         Garante a extração de múltiplos clipes (entre 3 e 7 por vídeo).
         """
         VIRAL_KEYWORDS = {
@@ -160,7 +185,6 @@ class HighlightAnalyzer:
         }
 
         candidates = []
-        # 1. Busca por gatilhos emocionais ao longo de toda a transcrição
         for window in available_windows:
             if len(candidates) >= target_clips:
                 break
@@ -172,10 +196,10 @@ class HighlightAnalyzer:
                 continue
 
             last_cut_end = w_start
-            for i, seg in enumerate(win_segs):
+            for seg in win_segs:
                 if len(candidates) >= target_clips:
                     break
-                if seg["start"] < last_cut_end + 15.0: # Espaçamento para evitar cortes colados
+                if seg["start"] < last_cut_end + 15.0:
                     continue
 
                 text_lower = seg["text"].lower()
@@ -207,26 +231,23 @@ class HighlightAnalyzer:
                         })
                         last_cut_end = end_t
 
-        # 2. Se encontrou menos clipes que o alvo (mínimo 3 a 7), distribui cortes nos intervalos livres restantes
         if len(candidates) < target_clips:
             for window in available_windows:
                 if len(candidates) >= target_clips:
                     break
                 w_dur = window["duration"]
-                if w_dur < 30.0:
+                if w_dur < 25.0:
                     continue
 
-                # Divide janelas grandes em blocos de ~40s
-                slices_possible = int(w_dur // 60.0)
-                step = w_dur / (slices_possible + 1) if slices_possible > 0 else 0
+                slices_possible = max(1, int(w_dur // 60.0))
+                step = w_dur / (slices_possible + 1)
 
-                for s_idx in range(max(1, slices_possible)):
+                for s_idx in range(slices_possible):
                     if len(candidates) >= target_clips:
                         break
                     s_time = window["start"] + 5.0 + (s_idx * step)
                     e_time = min(window["end"] - 2.0, s_time + 40.0)
 
-                    # Verifica se não colide com candidato já adicionado
                     collides = any(
                         max(s_time, c["start_time"]) < min(e_time, c["end_time"]) + 15.0
                         for c in candidates
@@ -245,11 +266,93 @@ class HighlightAnalyzer:
 
         return candidates[:target_clips]
 
-    def _call_groq_llm(self, title: str, segments: List[Dict], windows: List[Dict], api_key: str) -> List[Dict]:
-        return self._heuristic_gaming_detector(title, segments, windows, target_clips=7)
+    @staticmethod
+    def _build_llm_user_prompt(title: str, segments: List[Dict], windows: List[Dict], target_clips: int) -> str:
+        lines = []
+        for s in segments[:250]:
+            lines.append(f"[{s.get('start', 0):.1f}s - {s.get('end', 0):.1f}s] {s.get('text', '')}")
+        transcript_excerpt = "\n".join(lines)[:12000]
+        return (
+            f"Título do vídeo: {title}\n"
+            f"Janelas livres (em segundos): {json.dumps(windows)}\n"
+            f"Retorne até {target_clips} cortes virais (cada um entre 20s e 58s) apenas dentro das janelas livres.\n"
+            f"Transcrição:\n{transcript_excerpt}"
+        )
 
-    def _call_gemini_llm(self, title: str, segments: List[Dict], windows: List[Dict], api_key: str) -> List[Dict]:
-        return self._heuristic_gaming_detector(title, segments, windows, target_clips=7)
+    @staticmethod
+    def _parse_llm_json(raw_text: str) -> List[Dict[str, Any]]:
+        if not raw_text:
+            return []
+        match = re.search(r"\[[\s\S]*\]", raw_text)
+        if not match:
+            return []
+        data = json.loads(match.group(0))
+        valid = []
+        for item in data if isinstance(data, list) else []:
+            if isinstance(item, dict) and "start_time" in item and "end_time" in item:
+                valid.append({
+                    "start_time": float(item["start_time"]),
+                    "end_time": float(item["end_time"]),
+                    "title": str(item.get("title") or "CORTE VIRAL 🔥"),
+                    "hook_text": str(item.get("hook_text") or ""),
+                    "summary": str(item.get("summary") or ""),
+                    "virality_score": int(item.get("virality_score") or 88),
+                    "category": str(item.get("category") or "highlight"),
+                })
+        return valid
 
-    def _call_openai_llm(self, title: str, segments: List[Dict], windows: List[Dict], api_key: str) -> List[Dict]:
-        return self._heuristic_gaming_detector(title, segments, windows, target_clips=7)
+    def _call_openai_compat(self, url: str, api_key: str, model: str, user_prompt: str) -> List[Dict]:
+        body = json.dumps({
+            "model": model,
+            "temperature": 0.4,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+        }).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+            text = payload["choices"][0]["message"]["content"]
+            return self._parse_llm_json(text)
+
+    def _call_groq_llm(self, title: str, segments: List[Dict], windows: List[Dict], api_key: str, target_clips: int = 7) -> List[Dict]:
+        prompt = self._build_llm_user_prompt(title, segments, windows, target_clips)
+        return self._call_openai_compat(
+            "https://api.groq.com/openai/v1/chat/completions",
+            api_key,
+            "llama-3.3-70b-versatile",
+            prompt,
+        )
+
+    def _call_openai_llm(self, title: str, segments: List[Dict], windows: List[Dict], api_key: str, target_clips: int = 7) -> List[Dict]:
+        prompt = self._build_llm_user_prompt(title, segments, windows, target_clips)
+        return self._call_openai_compat(
+            "https://api.openai.com/v1/chat/completions",
+            api_key,
+            "gpt-4o-mini",
+            prompt,
+        )
+
+    def _call_gemini_llm(self, title: str, segments: List[Dict], windows: List[Dict], api_key: str, target_clips: int = 7) -> List[Dict]:
+        prompt = f"{SYSTEM_PROMPT}\n\n{self._build_llm_user_prompt(title, segments, windows, target_clips)}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+        body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+            text = payload["candidates"][0]["content"]["parts"][0]["text"]
+            return self._parse_llm_json(text)
+
+    def _call_ollama_llm(self, title: str, segments: List[Dict], windows: List[Dict], base_url: str, target_clips: int = 7) -> List[Dict]:
+        prompt = self._build_llm_user_prompt(title, segments, windows, target_clips)
+        model = self._get_setting("OLLAMA_MODEL", "llama3.1")
+        return self._call_openai_compat(
+            f"{base_url.rstrip('/')}/v1/chat/completions",
+            "",
+            model,
+            prompt,
+        )

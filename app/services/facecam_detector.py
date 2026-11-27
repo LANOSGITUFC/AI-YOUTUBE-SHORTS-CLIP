@@ -4,15 +4,19 @@ Detecta automaticamente a posição da webcam/facecam do streamer em vídeos 16:
 usando visão computacional (OpenCV 4/5) com clustering e fallback seguro.
 """
 
-import cv2
-import numpy as np
+try:
+    import cv2
+    import numpy as np
+except ImportError:
+    cv2 = None
+    np = None
 from typing import Dict, Any, Optional
 
 class FacecamDetector:
     def __init__(self):
         self.detector = None
         # Suporte a OpenCV 4 (CascadeClassifier) ou OpenCV 5 (FaceDetectorYN)
-        if hasattr(cv2, "CascadeClassifier") and hasattr(cv2, "data"):
+        if cv2 is not None and hasattr(cv2, "CascadeClassifier") and hasattr(cv2, "data"):
             cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
             try:
                 self.detector = cv2.CascadeClassifier(cascade_path)
@@ -29,7 +33,7 @@ class FacecamDetector:
         Analisa frames de amostra nos primeiros segundos do vídeo para localizar
         a região estática onde a facecam do streamer está posicionada.
         """
-        if not video_path:
+        if not video_path or cv2 is None or np is None:
             return self._default_fallback(1920, 1080)
 
         cap = cv2.VideoCapture(video_path)
