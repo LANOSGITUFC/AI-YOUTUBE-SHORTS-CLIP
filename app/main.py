@@ -72,7 +72,13 @@ def get_system_status(db: Session = Depends(get_db)):
     channels_active = db.query(SourceChannel).filter(SourceChannel.is_active == True).count()
     videos_count = db.query(SourceVideo).count()
     clips_count = db.query(ClipSegment).count()
-    rendered_count = db.query(ClipSegment).filter(ClipSegment.status.in_(["rendered", "scheduled", "published"])).count()
+    rendered_candidates = db.query(ClipSegment).filter(
+        ClipSegment.status.in_(["rendered", "scheduled", "published"])
+    ).all()
+    rendered_count = sum(
+        1 for c in rendered_candidates
+        if c.clip_path and os.path.exists(c.clip_path) and os.path.getsize(c.clip_path) > 0
+    )
     scheduled_count = db.query(ScheduledPost).filter(ScheduledPost.status.in_(["pending", "scheduled_on_youtube"])).count()
     dest_count = db.query(DestinationChannel).count()
 
@@ -166,8 +172,11 @@ def list_clips(video_id: Optional[str] = None, db: Session = Depends(get_db)):
         q = q.filter(ClipSegment.video_id == video_id)
     clips = q.order_by(ClipSegment.id.desc()).all()
 
-    return [
-        {
+    result = []
+    for c in clips:
+        is_ready = bool(c.clip_path and os.path.exists(c.clip_path) and os.path.getsize(c.clip_path) > 0)
+        has_thumb = bool(c.thumbnail_path and os.path.exists(c.thumbnail_path))
+        result.append({
             "id": c.id,
             "video_id": c.video_id,
             "video_title": c.video.title if c.video else "N/A",
@@ -180,12 +189,12 @@ def list_clips(video_id: Optional[str] = None, db: Session = Depends(get_db)):
             "category": c.category,
             "crop_mode": c.crop_mode,
             "status": c.status,
+            "is_ready": is_ready,
             "suggested_by": c.suggested_by,
-            "media_url": f"/media/clips/clip_{c.id}.mp4" if c.clip_path else None,
-            "thumbnail_url": f"/media/thumbnails/thumb_{c.id}.jpg" if c.thumbnail_path else None
-        }
-        for c in clips
-    ]
+            "media_url": f"/media/clips/{os.path.basename(c.clip_path)}" if is_ready else None,
+            "thumbnail_url": f"/media/thumbnails/{os.path.basename(c.thumbnail_path)}" if has_thumb else None
+        })
+    return result
 
 @app.post("/api/clips/propose")
 def propose_clip(payload: Dict[str, Any], db: Session = Depends(get_db)):
