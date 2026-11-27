@@ -21,6 +21,9 @@ SCOPES = [
     "https://www.googleapis.com/auth/youtube.force-ssl"
 ]
 
+# Armazena temporariamente o code_verifier (PKCE) por state entre /login e /callback
+_PKCE_VERIFIERS: Dict[str, str] = {}
+
 def get_client_secrets_path() -> Optional[str]:
     """Descobre automaticamente qualquer variação de nome do client_secret do Google"""
     candidates = [
@@ -58,19 +61,22 @@ class YouTubeAuthManager:
             scopes=SCOPES,
             redirect_uri=redirect_uri
         )
-        auth_url, _ = flow.authorization_url(
+        auth_url, returned_state = flow.authorization_url(
             access_type="offline", # Garante emissão de refresh_token permanente
             include_granted_scopes="false", # NUNCA misturar com escopos antigos de outros apps (ex: Drive)
             prompt="consent", # Força tela de consentimento para emissão do refresh token
             state=state
         )
+        if getattr(flow, "code_verifier", None):
+            _PKCE_VERIFIERS[returned_state] = flow.code_verifier
         return auth_url
 
     def handle_auth_callback(
         self,
         code: str,
         channel_name: str = "Canal Monetizado",
-        redirect_uri: str = "http://localhost:8000/api/auth/youtube/callback"
+        redirect_uri: str = "http://localhost:8000/api/auth/youtube/callback",
+        state: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Troca o authorization code pelo Refresh Token permanente e salva no banco.
@@ -82,8 +88,14 @@ class YouTubeAuthManager:
         flow = Flow.from_client_secrets_file(
             secrets_file,
             scopes=SCOPES,
-            redirect_uri=redirect_uri
+            redirect_uri=redirect_uri,
+            state=state
         )
+        lookup_state = state if state is not None else channel_name
+        code_verifier = _PKCE_VERIFIERS.pop(lookup_state, None)
+        if code_verifier:
+            flow.code_verifier = code_verifier
+
         flow.fetch_token(code=code)
         creds = flow.credentials
 

@@ -272,7 +272,7 @@ def youtube_oauth_callback(code: str, state: Optional[str] = "Canal Novo", db: S
     from app.services.auth_youtube import YouTubeAuthManager
     mgr = YouTubeAuthManager(db)
     try:
-        res = mgr.handle_auth_callback(code=code, channel_name=state or "Canal Novo")
+        res = mgr.handle_auth_callback(code=code, channel_name=state or "Canal Novo", state=state)
         return HTMLResponse(f"""
         <html>
         <body style="background:#0c1017; color:#fff; font-family:sans-serif; text-align:center; padding:50px;">
