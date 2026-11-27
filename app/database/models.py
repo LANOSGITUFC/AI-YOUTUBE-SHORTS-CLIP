@@ -64,12 +64,17 @@ class ClipSegment(Base):
     hook_text = Column(String(300), nullable=True)
     summary = Column(Text, nullable=True)
     virality_score = Column(Integer, default=80) # 0 to 100
-    category = Column(String(50), default="highlight") # funny, rage, clutch, epic, story
+    hook_score = Column(Integer, default=85)     # 0 to 100 (OpusClip Hook)
+    pacing_score = Column(Integer, default=84)   # 0 to 100 (OpusClip Ritmo)
+    story_score = Column(Integer, default=86)    # 0 to 100 (OpusClip História)
+    liked = Column(Boolean, default=False)
+    category = Column(String(50), default="highlight") # funny, rage, scare, clutch, epic, story
     
     clip_path = Column(String(500), nullable=True)
     thumbnail_path = Column(String(500), nullable=True)
     subtitles_path = Column(String(500), nullable=True)
-    crop_mode = Column(String(50), default="split_screen") # split_screen, face_tracking, blur_bg
+    crop_mode = Column(String(50), default="split_screen") # split_screen, face_tracking, blur_bg, three, four
+    editor_config_json = Column(Text, nullable=True) # JSON completo do editor OpusClip (preset, motion, transition, autoColor, progressBar, headline, silence removal, customWords)
     suggested_by = Column(String(50), default="ai_analyzer") # claude_code, open_code, gemini, etc.
     status = Column(String(50), default="analyzed") # analyzed, rendered, scheduled, published, discarded
     
@@ -81,6 +86,25 @@ class ClipSegment(Base):
     __table_args__ = (
         Index("idx_video_start_end", "video_id", "start_time", "end_time"),
     )
+
+
+class BrandKit(Base):
+    """
+    OpusClip-style Brand Kits: identidade visual reutilizável (cores, fonte, preset de legenda, marca d'água)
+    """
+    __tablename__ = "brand_kits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(120), nullable=False)
+    primary_color = Column(String(20), default="#FFFFFF")
+    highlight_color = Column(String(20), default="#04F827")
+    secondary_color = Column(String(20), default="#000000")
+    font_family = Column(String(80), default="auto")
+    default_preset = Column(String(50), default="karaoke")
+    watermark_text = Column(String(120), default="")
+    watermark_position = Column(String(30), default="top-right") # top-left, top-right, bottom-left, bottom-right, top-center
+    watermark_opacity = Column(Float, default=0.75)
+    created_at = Column(DateTime, default=get_utc_now)
 
 
 class DestinationChannel(Base):
@@ -112,7 +136,7 @@ class ScheduledPost(Base):
     destination_channel_id = Column(Integer, ForeignKey("destination_channels.id"), nullable=False, index=True)
     scheduled_for = Column(DateTime, nullable=False, index=True)
     published_at = Column(DateTime, nullable=True)
-    status = Column(String(50), default="pending") # pending, scheduled_on_youtube, published, failed, cancelled
+    status = Column(String(50), default="pending") # pending, awaiting_oauth, scheduled_on_youtube, published, failed, cancelled
     youtube_video_id = Column(String(50), nullable=True)
     youtube_url = Column(String(500), nullable=True)
     error_log = Column(Text, nullable=True)

@@ -2,7 +2,7 @@ import os
 import json
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
-from app.database.models import Base, SourceChannel, DestinationChannel, SystemSetting
+from app.database.models import Base, SourceChannel, DestinationChannel, SystemSetting, BrandKit
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/shorts_clipper.db")
 
@@ -83,14 +83,54 @@ def init_db():
     
     Base.metadata.create_all(bind=engine)
 
-    # Migração leve para bancos SQLite existentes sem a coluna 'weight'
+    # Migração leve para bancos SQLite existentes
     if DATABASE_URL.startswith("sqlite"):
         with engine.begin() as conn:
-            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(destination_channels)")).fetchall()]
-            if cols and "weight" not in cols:
-                conn.execute(text("ALTER TABLE destination_channels ADD COLUMN weight INTEGER NOT NULL DEFAULT 1"))
+            dest_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(destination_channels)")).fetchall()]
+            if dest_cols and "weight" not in dest_cols:
+                conn.execute(text("ALTER TABLE destination_channels ADD COLUMN weight INTEGER NOT NULL DEFAULT 100"))
+
+            clip_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(clip_segments)")).fetchall()]
+            if clip_cols:
+                migrations = [
+                    ("hook_score", "INTEGER DEFAULT 85"),
+                    ("pacing_score", "INTEGER DEFAULT 84"),
+                    ("story_score", "INTEGER DEFAULT 86"),
+                    ("liked", "BOOLEAN DEFAULT 0"),
+                    ("editor_config_json", "TEXT"),
+                ]
+                for col_name, col_def in migrations:
+                    if col_name not in clip_cols:
+                        conn.execute(text(f"ALTER TABLE clip_segments ADD COLUMN {col_name} {col_def}"))
     
     with SessionLocal() as db:
+        # Seed Default Brand Kits (OpusClip Style)
+        if db.query(BrandKit).count() == 0:
+            db.add_all([
+                BrandKit(
+                    name="Gamer Viral (Karaokê Neon)",
+                    primary_color="#FFFFFF",
+                    highlight_color="#04F827",
+                    secondary_color="#000000",
+                    font_family="auto",
+                    default_preset="karaoke",
+                    watermark_text="",
+                    watermark_position="top-right",
+                    watermark_opacity=0.75,
+                ),
+                BrandKit(
+                    name="Hormozi / Think Media",
+                    primary_color="#FFFFFF",
+                    highlight_color="#FFE600",
+                    secondary_color="#000000",
+                    font_family="auto",
+                    default_preset="think-media",
+                    watermark_text="",
+                    watermark_position="top-center",
+                    watermark_opacity=0.65,
+                ),
+            ])
+
         # Seed Source Channels
         for ch in DEFAULT_CHANNELS:
             existing = db.query(SourceChannel).filter(SourceChannel.channel_id == ch["channel_id"]).first()

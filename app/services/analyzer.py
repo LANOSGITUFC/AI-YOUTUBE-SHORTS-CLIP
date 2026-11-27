@@ -179,6 +179,10 @@ class HighlightAnalyzer:
                     category=str(cand.get("category") or "highlight")[:45],
                     suggested_by=provider_used,
                 )
+                base_sc = seg.virality_score or 85
+                seg.hook_score = max(1, min(100, int(cand.get("hook_score", min(99, base_sc + 2)))))
+                seg.pacing_score = max(1, min(100, int(cand.get("pacing_score", max(60, base_sc - 1)))))
+                seg.story_score = max(1, min(100, int(cand.get("story_score", base_sc))))
                 seg.crop_mode = default_crop
                 saved_clips.append(seg)
 

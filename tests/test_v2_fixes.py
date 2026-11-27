@@ -183,6 +183,39 @@ class TestV2Fixes(unittest.TestCase):
         self.assertNotIn("statChannels", js)
         self.assertIn("--bg-canvas", css)
 
+    def test_06_opusclip_endpoints(self):
+        """Endpoints OpusClip (14 presets, Brand Kits, detalhes com sub-scores e AI Emojis) respondem corretamente."""
+        pr = self.client.get("/api/caption-presets").json()
+        self.assertEqual(len(pr["presets"]), 14)
+
+        bk_create = self.client.post("/api/brand-kits", json={"name": "Kit Gamer", "default_preset": "karaoke"})
+        self.assertEqual(bk_create.status_code, 200)
+        bk_id = bk_create.json()["id"]
+
+        bks = self.client.get("/api/brand-kits").json()["kits"]
+        self.assertTrue(any(k["id"] == bk_id for k in bks))
+
+        clip_res = self.client.post(
+            "/api/clips/propose",
+            json={"video_id": "vid_test_001", "start_time": 10, "end_time": 42, "crop_mode": "three", "title": "Teste 3 painéis"},
+        )
+        self.assertEqual(clip_res.status_code, 200)
+        cid = clip_res.json()["clip_id"]
+
+        detail = self.client.get(f"/api/clips/{cid}").json()
+        self.assertIn("hook_score", detail)
+        self.assertIn("pacing_score", detail)
+        self.assertIn("story_score", detail)
+        self.assertIn("words", detail)
+
+        patch_res = self.client.patch(
+            f"/api/clips/{cid}",
+            json={"liked": True, "editor_config": {"caption_preset": "karaoke", "progress_bar": True, "headline_text": "CLUTCH"}},
+        )
+        self.assertEqual(patch_res.status_code, 200)
+        self.assertTrue(patch_res.json()["clip"]["liked"])
+        self.assertEqual(patch_res.json()["clip"]["editor_config"]["caption_preset"], "karaoke")
+
 
 if __name__ == "__main__":
     unittest.main()

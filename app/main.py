@@ -13,26 +13,27 @@ import threading
 import subprocess
 import urllib.request
 from typing import Dict, Any, Optional
-from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app.database.session import SessionLocal, init_db, get_db
 from app.database.models import (
-    SourceChannel, SourceVideo, ClipSegment, DestinationChannel, ScheduledPost, AgentBusEvent, SystemSetting
+    SourceChannel, SourceVideo, ClipSegment, DestinationChannel, ScheduledPost, AgentBusEvent, SystemSetting, BrandKit
 )
 from app.services.monitor import ChannelMonitor
 from app.services.deduplicator import DeduplicationEngine
-from app.services.downloader import VideoDownloader, extract_youtube_video_id
+from app.services.downloader import VideoDownloader, extract_youtube_video_id, COOKIES_FILE
 from app.services.editor import VideoEditor
+from app.services.subtitles import OPUS_CAPTION_PRESETS
 from app.services.scheduler import PostScheduler
 from app.services.pipeline_worker import PipelineWorker
 from app.services.auth_youtube import YouTubeAuthManager, get_client_secrets_path
 
 BOOT_ID = str(uuid.uuid4())
-VALID_CROP_MODES = {"split_screen", "blur_bg", "face_tracking"}
+VALID_CROP_MODES = {"split_screen", "blur_bg", "face_tracking", "three", "four"}
 SECRET_SETTING_KEYS = {"GEMINI_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"}
 
 app = FastAPI(
@@ -565,6 +566,94 @@ def get_video_dedup_timeline(video_id: str, db: Session = Depends(get_db)):
 # CLIPS, VALIDATION, EDITING & RENDERING
 # ==========================================
 
+def _parse_editor_config(raw: Optional[str]) -> Dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _load_clip_words(clip: ClipSegment) -> list:
+    ed_cfg = _parse_editor_config(clip.editor_config_json)
+    if isinstance(ed_cfg.get("custom_words"), list) and ed_cfg["custom_words"]:
+        return ed_cfg["custom_words"]
+    if not clip.video or not clip.video.transcript_path or not os.path.exists(clip.video.transcript_path):
+        return []
+    try:
+        with open(clip.video.transcript_path, "r", encoding="utf-8") as f:
+            t_data = json.load(f)
+        out = []
+        for seg in t_data.get("segments", []):
+            for w in seg.get("words", []):
+                ws = float(w.get("start", 0))
+                we = float(w.get("end", ws + 0.25))
+                if we >= float(clip.start_time) and ws <= float(clip.end_time) + 0.35:
+                    out.append({
+                        "word": str(w.get("word") or w.get("text") or "").strip(),
+                        "start": round(ws, 2),
+                        "end": round(we, 2),
+                        "emoji": str(w.get("emoji") or ""),
+                    })
+        return out
+    except Exception:
+        return []
+
+
+def _serialize_clip(c: ClipSegment, include_words: bool = False) -> Dict[str, Any]:
+    is_ready = _is_valid_mp4(c.clip_path)
+    has_thumb = bool(c.thumbnail_path and os.path.exists(c.thumbnail_path))
+    has_source = bool(c.video and c.video.video_path and os.path.exists(c.video.video_path))
+    base = {
+        "id": c.id,
+        "video_id": c.video_id,
+        "video_title": c.video.title if c.video else "N/A",
+        "channel_name": (c.video.channel.name if (c.video and c.video.channel) else "Desconhecido"),
+        "has_source_video": has_source,
+        "source_stream_url": f"/api/videos/{c.video_id}/stream" if has_source else None,
+        "start": round(float(c.start_time), 1),
+        "end": round(float(c.end_time), 1),
+        "duration": round(float(c.duration), 1),
+        "title": c.title,
+        "hook": c.hook_text or "",
+        "summary": c.summary or "",
+        "score": c.virality_score,
+        "hook_score": c.hook_score if c.hook_score is not None else min(99, (c.virality_score or 85) + 2),
+        "pacing_score": c.pacing_score if c.pacing_score is not None else max(60, (c.virality_score or 85) - 1),
+        "story_score": c.story_score if c.story_score is not None else (c.virality_score or 85),
+        "liked": bool(c.liked),
+        "category": c.category,
+        "crop_mode": c.crop_mode or "split_screen",
+        "editor_config": _parse_editor_config(c.editor_config_json),
+        "status": c.status,
+        "is_ready": is_ready,
+        "file_size_mb": round(os.path.getsize(c.clip_path) / (1024 * 1024), 2) if is_ready else 0.0,
+        "suggested_by": c.suggested_by,
+        "media_url": f"/media/clips/{os.path.basename(c.clip_path)}" if is_ready else None,
+        "thumbnail_url": f"/media/thumbnails/{os.path.basename(c.thumbnail_path)}" if has_thumb else None,
+    }
+    if include_words:
+        base["words"] = _load_clip_words(c)
+    return base
+
+
+@app.get("/api/caption-presets")
+def list_caption_presets():
+    """Retorna os 14 templates oficiais de legendas estilo OpusClip e 2Short.ai."""
+    return {"presets": OPUS_CAPTION_PRESETS}
+
+
+@app.get("/api/videos/{video_id}/stream")
+def stream_source_video(video_id: str, db: Session = Depends(get_db)):
+    """Serve o vídeo fonte com suporte nativo a HTTP Range (206) para preview ao vivo no Editor OpusClip."""
+    video = db.query(SourceVideo).filter(SourceVideo.id == video_id).first()
+    if not video or not video.video_path or not os.path.exists(video.video_path):
+        raise HTTPException(status_code=404, detail="Arquivo de vídeo original não disponível em disco.")
+    return FileResponse(video.video_path, media_type="video/mp4")
+
+
 @app.get("/api/clips")
 def list_clips(
     video_id: Optional[str] = None,
@@ -577,35 +666,132 @@ def list_clips(
     if status:
         q = q.filter(ClipSegment.status == status)
     clips = q.order_by(ClipSegment.id.desc()).all()
+    return [_serialize_clip(c, include_words=False) for c in clips]
 
-    result = []
-    for c in clips:
-        is_ready = _is_valid_mp4(c.clip_path)
-        has_thumb = bool(c.thumbnail_path and os.path.exists(c.thumbnail_path))
-        has_source = bool(c.video and c.video.video_path and os.path.exists(c.video.video_path))
-        result.append({
-            "id": c.id,
-            "video_id": c.video_id,
-            "video_title": c.video.title if c.video else "N/A",
-            "channel_name": (c.video.channel.name if (c.video and c.video.channel) else "Desconhecido"),
-            "has_source_video": has_source,
-            "start": round(float(c.start_time), 1),
-            "end": round(float(c.end_time), 1),
-            "duration": round(float(c.duration), 1),
-            "title": c.title,
-            "hook": c.hook_text or "",
-            "summary": c.summary or "",
-            "score": c.virality_score,
-            "category": c.category,
-            "crop_mode": c.crop_mode or "split_screen",
-            "status": c.status,
-            "is_ready": is_ready,
-            "file_size_mb": round(os.path.getsize(c.clip_path) / (1024 * 1024), 2) if is_ready else 0.0,
-            "suggested_by": c.suggested_by,
-            "media_url": f"/media/clips/{os.path.basename(c.clip_path)}" if is_ready else None,
-            "thumbnail_url": f"/media/thumbnails/{os.path.basename(c.thumbnail_path)}" if has_thumb else None,
-        })
-    return result
+
+@app.get("/api/clips/{clip_id}")
+def get_clip_detail(clip_id: int, db: Session = Depends(get_db)):
+    """Retorna clipe completo com sub-scores OpusClip, editor_config e transcrição palavra-por-palavra."""
+    clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clipe não encontrado.")
+    return _serialize_clip(clip, include_words=True)
+
+
+@app.post("/api/clips/{clip_id}/ai-emojis")
+def generate_clip_ai_emojis(clip_id: int, db: Session = Depends(get_db)):
+    """Injeta emojis contextuais nas palavras-chave do clipe (estilo OpusClip AI Emojis)."""
+    clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clipe não encontrado.")
+
+    words = _load_clip_words(clip)
+    EMOJI_MAP = {
+        "deus": "😱", "susto": "😱", "medo": "😨", "morri": "💀", "morte": "💀", "morto": "💀",
+        "fogo": "🔥", "insano": "🔥", "brabo": "🔥", "mitou": "🔥", "mitei": "🔥", "clutch": "🏆",
+        "ganhou": "🏆", "vitoria": "🏆", "vitória": "🏆", "dinheiro": "💸", "rico": "💰",
+        "kkkk": "😂", "haha": "😂", "rir": "😂", "engraçado": "😂", "mentira": "🤯", "impossível": "🤯",
+        "impossivel": "🤯", "caraca": "🤯", "nossa": "😳", "socorro": "🚨", "cuidado": "⚠️",
+        "trollei": "🤡", "burro": "🤡", "vacilou": "🤡", "tiro": "🎯", "headshot": "🎯",
+        "coração": "❤️", "amo": "❤️", "bora": "🚀", "partiu": "🚀", "raiva": "🤬", "desgraça": "🤬",
+    }
+    added = 0
+    for idx, w in enumerate(words):
+        clean = re.sub(r"[^a-zA-ZÀ-ÿ0-9]", "", str(w.get("word") or "").lower())
+        for kw, emo in EMOJI_MAP.items():
+            if kw in clean and not w.get("emoji"):
+                w["emoji"] = emo
+                added += 1
+                break
+        if added >= 8:
+            break
+
+    ed_cfg = _parse_editor_config(clip.editor_config_json)
+    ed_cfg["custom_words"] = words
+    clip.editor_config_json = json.dumps(ed_cfg, ensure_ascii=False)
+    db.commit()
+    return {"success": True, "emojis_added": added, "words": words}
+
+
+@app.get("/api/brand-kits")
+def list_brand_kits(db: Session = Depends(get_db)):
+    kits = db.query(BrandKit).order_by(BrandKit.id.asc()).all()
+    return {
+        "kits": [
+            {
+                "id": k.id,
+                "name": k.name,
+                "primary_color": k.primary_color,
+                "highlight_color": k.highlight_color,
+                "secondary_color": k.secondary_color,
+                "font_family": k.font_family,
+                "default_preset": k.default_preset,
+                "watermark_text": k.watermark_text or "",
+                "watermark_position": k.watermark_position or "top-right",
+                "watermark_opacity": k.watermark_opacity if k.watermark_opacity is not None else 0.75,
+            }
+            for k in kits
+        ]
+    }
+
+
+@app.post("/api/brand-kits")
+def create_brand_kit(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome do Brand Kit é obrigatório.")
+    kit = BrandKit(
+        name=name[:115],
+        primary_color=str(payload.get("primary_color") or "#FFFFFF")[:20],
+        highlight_color=str(payload.get("highlight_color") or "#04F827")[:20],
+        secondary_color=str(payload.get("secondary_color") or "#000000")[:20],
+        font_family=str(payload.get("font_family") or "auto")[:75],
+        default_preset=str(payload.get("default_preset") or "karaoke")[:45],
+        watermark_text=str(payload.get("watermark_text") or "")[:115],
+        watermark_position=str(payload.get("watermark_position") or "top-right")[:25],
+        watermark_opacity=max(0.1, min(1.0, float(payload.get("watermark_opacity", 0.75) or 0.75))),
+    )
+    db.add(kit)
+    db.commit()
+    db.refresh(kit)
+    return {"success": True, "id": kit.id, "name": kit.name}
+
+
+@app.delete("/api/brand-kits/{kit_id}")
+def delete_brand_kit(kit_id: int, db: Session = Depends(get_db)):
+    kit = db.query(BrandKit).filter(BrandKit.id == kit_id).first()
+    if not kit:
+        raise HTTPException(status_code=404, detail="Brand Kit não encontrado.")
+    db.delete(kit)
+    db.commit()
+    return {"success": True, "deleted_id": kit_id}
+
+
+@app.get("/api/settings/cookies")
+def get_cookies_status():
+    exists = os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 32
+    return {
+        "has_cookies": exists,
+        "size_bytes": os.path.getsize(COOKIES_FILE) if exists else 0,
+    }
+
+
+@app.post("/api/settings/cookies")
+def save_cookies_txt(payload: Dict[str, Any]):
+    content = str(payload.get("cookies_text") or "").strip()
+    if len(content) < 32:
+        raise HTTPException(status_code=400, detail="Cole o conteúdo válido do arquivo cookies.txt (formato Netscape).")
+    os.makedirs(os.path.dirname(COOKIES_FILE) or ".", exist_ok=True)
+    with open(COOKIES_FILE, "w", encoding="utf-8") as f:
+        f.write(content + "\n")
+    return {"success": True, "message": "Arquivo data/cookies.txt salvo com sucesso!"}
+
+
+@app.delete("/api/settings/cookies")
+def delete_cookies_txt():
+    if os.path.exists(COOKIES_FILE):
+        os.remove(COOKIES_FILE)
+    return {"success": True, "message": "Cookies removidos."}
 
 
 @app.post("/api/clips/propose")
@@ -705,12 +891,18 @@ def update_clip(clip_id: int, payload: Dict[str, Any], db: Session = Depends(get
         clip.hook_text = str(payload["hook_text"] or "")[:280]
     if "category" in payload:
         clip.category = str(payload["category"] or "highlight")[:45]
+    if "liked" in payload:
+        clip.liked = bool(payload["liked"])
+    if isinstance(payload.get("editor_config"), dict):
+        merged = _parse_editor_config(clip.editor_config_json)
+        merged.update(payload["editor_config"])
+        clip.editor_config_json = json.dumps(merged, ensure_ascii=False)
 
     clip.start_time = round(new_start, 1)
     clip.end_time = round(new_end, 1)
     clip.duration = round(dur, 1)
     db.commit()
-    return {"success": True, "clip_id": clip.id, "start": clip.start_time, "end": clip.end_time, "duration": clip.duration}
+    return {"success": True, "clip": _serialize_clip(clip, include_words=False)}
 
 
 @app.delete("/api/clips/{clip_id}")
