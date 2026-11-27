@@ -168,6 +168,9 @@
       <button onclick="switchTab('aibus')" id="tabBtnAibus" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
         <i class="fa-solid fa-terminal text-cyan-400"></i> Console Claude Code & Multi-IA
       </button>
+      <button onclick="switchTab('destinations')" id="tabBtnDestinations" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
+        <i class="fa-solid fa-cloud-arrow-up text-rose-500"></i> Contas & Monetização
+      </button>
     </div>
 
     <!-- TAB 1: 9 CANAIS MONITORADOS -->
@@ -283,6 +286,37 @@
 
         <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 font-mono text-xs max-h-96 overflow-y-auto space-y-2.5" id="aiBusLogs">
           <!-- Logs renderizados via JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 6: CONTAS & MONETIZAÇÃO (YOUTUBE OAUTH2) -->
+    <section id="tabContentDestinations" class="space-y-4 hidden">
+      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6 space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-studio-800">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+              <i class="fa-brands fa-youtube text-brand-500"></i>
+              Contas do YouTube Conectadas para Monetização
+            </h2>
+            <p class="text-xs text-slate-400 mt-1">
+              Conecte múltiplos canais do YouTube usando OAuth 2.0 oficial. Cada canal tem seu Refresh Token próprio para envio de 4 vídeos/dia.
+            </p>
+          </div>
+          <a href="/api/auth/youtube/login" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-xs font-bold text-white transition flex items-center gap-2 shadow-lg shadow-red-600/30">
+            <i class="fa-solid fa-plus"></i> Conectar Nova Conta (OAuth Google)
+          </a>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="destinationsList">
+          <!-- Renderizado via JS -->
+        </div>
+
+        <div class="p-4 bg-studio-950 border border-studio-800 rounded-xl text-xs space-y-2 text-slate-400">
+          <span class="font-bold text-white flex items-center gap-1.5"><i class="fa-solid fa-circle-info text-cyan-400"></i> Como funciona a cota e os múltiplos canais:</span>
+          <p>• O YouTube concede <strong>10.000 unidades de cota gratuitas por dia</strong> no Google Cloud. Cada upload de vídeo consome 1.600 unidades (permitindo até 6 uploads diários por projeto).</p>
+          <p>• Com a meta de <strong>4 vídeos por dia por canal</strong>, 1 projeto do Google Cloud atende perfeitamente 1 a 2 canais com folga.</p>
+          <p>• Para monetizar mais canais (ex: 5 a 10 canais), basta criar projetos adicionais gratuitos no Google Cloud Console e cadastrar os tokens correspondentes no projeto.</p>
         </div>
       </div>
     </section>
@@ -469,8 +503,41 @@
       } catch (e) { console.error(e); }
     }
 
+    async function loadDestinations() {
+      try {
+        const res = await fetch('/api/destination-channels');
+        const channels = await res.json();
+        const container = document.getElementById('destinationsList');
+        if (!channels.length) {
+          container.innerHTML = '<p class="text-xs text-slate-400">Nenhum canal de destino conectado ainda.</p>';
+          return;
+        }
+        container.innerHTML = channels.map(c => `
+          <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 flex flex-col justify-between">
+            <div class="flex items-start justify-between">
+              <div>
+                <h3 class="font-bold text-sm text-white">${c.name}</h3>
+                <span class="text-xs text-slate-400 font-mono">ID: ${c.youtube_channel_id || 'ID Pendente de Auth'}</span>
+              </div>
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                c.has_token 
+                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' 
+                  : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+              }">
+                ${c.has_token ? 'TOKEN ATIVO (OAuth)' : 'SIMULAÇÃO / SEM TOKEN'}
+              </span>
+            </div>
+            <div class="mt-4 pt-3 border-t border-studio-800 text-xs text-slate-400 flex justify-between items-center">
+              <span>Limite: <strong class="text-white">${c.daily_post_limit} vídeos/dia</strong></span>
+              <span class="font-mono text-rose-400">${c.scheduled_count} agendados</span>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) { console.error(e); }
+    }
+
     function switchTab(tab) {
-      ['channels', 'calendar', 'clips', 'timeline', 'aibus'].forEach(t => {
+      ['channels', 'calendar', 'clips', 'timeline', 'aibus', 'destinations'].forEach(t => {
         const btn = document.getElementById('tabBtn' + t.charAt(0).toUpperCase() + t.slice(1));
         const content = document.getElementById('tabContent' + t.charAt(0).toUpperCase() + t.slice(1));
         if (!btn || !content) return;
@@ -488,6 +555,7 @@
       if (tab === 'clips') loadClips();
       if (tab === 'timeline') loadVideosForTimeline();
       if (tab === 'aibus') loadAIBusEvents();
+      if (tab === 'destinations') loadDestinations();
     }
 
     async function triggerCheckChannels() {

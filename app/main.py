@@ -233,6 +233,68 @@ def auto_fill_schedule(db: Session = Depends(get_db)):
     return {"message": f"{count} novos clipes agendados na grade de 4 vídeos/dia!"}
 
 # ==========================================
+# DESTINATION CHANNELS & YOUTUBE OAUTH2
+# ==========================================
+
+@app.get("/api/destination-channels")
+def list_destination_channels(db: Session = Depends(get_db)):
+    channels = db.query(DestinationChannel).all()
+    out = []
+    for c in channels:
+        has_token = bool(c.oauth_credentials_path and os.path.exists(c.oauth_credentials_path))
+        scheduled_posts_count = db.query(ScheduledPost).filter(ScheduledPost.destination_channel_id == c.id).count()
+        out.append({
+            "id": c.id,
+            "name": c.name,
+            "youtube_channel_id": c.youtube_channel_id,
+            "has_token": has_token,
+            "daily_post_limit": c.daily_post_limit,
+            "posting_times": json.loads(c.posting_times) if c.posting_times else ["11:30", "15:00", "18:30", "21:00"],
+            "scheduled_count": scheduled_posts_count,
+            "is_active": c.is_active
+        })
+    return out
+
+@app.get("/api/auth/youtube/login")
+def youtube_oauth_login(channel_name: str = "Canal Novo", db: Session = Depends(get_db)):
+    from fastapi.responses import RedirectResponse
+    from app.services.auth_youtube import YouTubeAuthManager
+    mgr = YouTubeAuthManager(db)
+    try:
+        url = mgr.get_auth_url(state=channel_name)
+        return RedirectResponse(url)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/auth/youtube/callback")
+def youtube_oauth_callback(code: str, state: Optional[str] = "Canal Novo", db: Session = Depends(get_db)):
+    from fastapi.responses import HTMLResponse
+    from app.services.auth_youtube import YouTubeAuthManager
+    mgr = YouTubeAuthManager(db)
+    try:
+        res = mgr.handle_auth_callback(code=code, channel_name=state or "Canal Novo")
+        return HTMLResponse(f"""
+        <html>
+        <body style="background:#0c1017; color:#fff; font-family:sans-serif; text-align:center; padding:50px;">
+            <h1 style="color:#10b981;">✅ Canal Conectado com Sucesso!</h1>
+            <p>Canal: <strong>{res['name']}</strong> (ID: {res['youtube_channel_id']})</p>
+            <p>O token permanente foi salvo em <code>{res['token_saved_at']}</code> e já está pronto para agendamento!</p>
+            <a href="/" style="display:inline-block; margin-top:20px; padding:10px 20px; background:#f43f5e; color:#fff; text-decoration:none; border-radius:8px; font-weight:bold;">Voltar ao Painel</a>
+        </body>
+        </html>
+        """)
+    except Exception as e:
+        return HTMLResponse(f"""
+        <html>
+        <body style="background:#0c1017; color:#fff; font-family:sans-serif; text-align:center; padding:50px;">
+            <h1 style="color:#ef4444;">❌ Erro ao Conectar Canal</h1>
+            <p>{str(e)}</p>
+            <a href="/" style="display:inline-block; margin-top:20px; padding:10px 20px; background:#334155; color:#fff; text-decoration:none; border-radius:8px;">Voltar ao Painel</a>
+        </body>
+        </html>
+        """)
+
+# ==========================================
 # AI BUS & COLLABORATION LOG
 # ==========================================
 
