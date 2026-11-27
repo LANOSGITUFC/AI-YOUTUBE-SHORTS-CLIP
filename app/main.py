@@ -928,10 +928,13 @@ def delete_brand_kit(kit_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/settings/cookies")
 def get_cookies_status():
+    from app.services.downloader import validate_cookies_file
     exists = os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 32
+    diag = validate_cookies_file(COOKIES_FILE)
     return {
         "has_cookies": exists,
         "size_bytes": os.path.getsize(COOKIES_FILE) if exists else 0,
+        "diagnostic": diag,
     }
 
 

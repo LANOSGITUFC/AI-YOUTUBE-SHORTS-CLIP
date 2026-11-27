@@ -47,6 +47,39 @@ def extract_youtube_video_id(url_or_id: str) -> Optional[str]:
     return None
 
 
+def validate_cookies_file(path: str = COOKIES_FILE) -> Dict[str, Any]:
+    """Valida localmente se data/cookies.txt está no formato Netscape esperado pelo yt-dlp e contém sessão do YouTube."""
+    abs_path = os.path.abspath(path)
+    if not os.path.exists(abs_path) or os.path.getsize(abs_path) == 0:
+        return {"exists": False, "valid_netscape": False, "has_youtube_auth": False, "lines": 0, "reason": "Arquivo não encontrado ou vazio."}
+    try:
+        with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
+            raw = f.read()
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+        tab_lines = [ln for ln in lines if ln.count("\t") >= 6]
+        yt_lines = [ln for ln in tab_lines if "youtube.com" in ln.lower()]
+        auth_tokens = ("LOGIN_INFO", "SAPISID", "__Secure-3PSID", "__Secure-3PAPISID", "SID")
+        has_auth = any(any(tok in ln for tok in auth_tokens) for ln in yt_lines)
+        valid_netscape = len(tab_lines) > 0
+        reason = "OK (formato Netscape com sessão YouTube detectada)"
+        if not valid_netscape:
+            reason = "Formato inválido! O yt-dlp exige formato Netscape (colunas separadas por TAB), não JSON."
+        elif not yt_lines:
+            reason = "Arquivo sem cookies de youtube.com. Exporte estando na aba youtube.com."
+        elif not has_auth:
+            reason = "Cookies de youtube.com sem sessão logada (faltando LOGIN_INFO/SAPISID). Faça login no YouTube antes de exportar."
+        return {
+            "exists": True,
+            "valid_netscape": valid_netscape,
+            "has_youtube_auth": has_auth,
+            "lines": len(tab_lines),
+            "youtube_cookies": len(yt_lines),
+            "reason": reason,
+        }
+    except Exception as exc:
+        return {"exists": True, "valid_netscape": False, "has_youtube_auth": False, "lines": 0, "reason": str(exc)}
+
+
 class VideoDownloader:
     def __init__(self, db: Session):
         self.db = db
@@ -61,18 +94,17 @@ class VideoDownloader:
         elif shutil.which("node"):
             flags.extend(["--js-runtimes", "node"])
 
-        # Cookies opcionais (arquivo data/cookies.txt ou navegador configurado no painel)
-        if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
-            flags.extend(["--cookies", COOKIES_FILE])
-        else:
-            row = (
-                self.db.query(SystemSetting)
-                .filter(SystemSetting.key == "YT_COOKIES_BROWSER")
-                .first()
-            )
-            browser = (row.value or "").strip().lower() if row else ""
-            if browser in ("chrome", "chromium", "firefox", "brave", "edge", "opera", "vivaldi"):
-                flags.extend(["--cookies-from-browser", browser])
+        # Cookies autenticados: prioriza navegador selecionado (sempre fresco) ou data/cookies.txt válido
+        row = (
+            self.db.query(SystemSetting)
+            .filter(SystemSetting.key == "YT_COOKIES_BROWSER")
+            .first()
+        )
+        browser = (row.value or "").strip().lower() if row else ""
+        if browser in ("chrome", "chromium", "firefox", "brave", "edge", "opera", "vivaldi"):
+            flags.extend(["--cookies-from-browser", browser])
+        elif os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
+            flags.extend(["--cookies", os.path.abspath(COOKIES_FILE)])
 
         return flags
 
