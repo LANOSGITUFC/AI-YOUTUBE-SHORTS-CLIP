@@ -15,7 +15,7 @@ import urllib.request
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse, FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -935,6 +935,50 @@ def render_clip_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clips/{clip_id}/frame")
+def clip_source_frame(clip_id: int, t: Optional[float] = None, db: Session = Depends(get_db)):
+    """Quadro JPEG do vídeo original (usado como fundo no Editor visual de layout)."""
+    clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clipe não encontrado.")
+    video = clip.video
+    if not video or not video.video_path or not os.path.exists(video.video_path):
+        raise HTTPException(status_code=404, detail="Vídeo original não disponível em disco.")
+    start, end = float(clip.start_time), float(clip.end_time)
+    ts = start + min(2.0, (end - start) / 2.0) if t is None else max(0.0, float(t))
+    cmd = [
+        "ffmpeg", "-v", "error", "-ss", f"{ts:.2f}", "-i", video.video_path,
+        "-frames:v", "1", "-vf", "scale='min(1280,iw)':-2", "-q:v", "4",
+        "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, timeout=30)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Falha ao extrair quadro: {e}")
+    if res.returncode != 0 or not res.stdout:
+        raise HTTPException(status_code=500, detail="Falha ao extrair quadro do vídeo original.")
+    return Response(content=res.stdout, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+
+
+@app.post("/api/clips/{clip_id}/detect-facecam")
+def clip_detect_facecam(clip_id: int, db: Session = Depends(get_db)):
+    """Roda o detector de facecam (OpenCV) e devolve a caixa em frações 0..1 da fonte."""
+    from app.services.facecam_detector import FacecamDetector
+
+    clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clipe não encontrado.")
+    video = clip.video
+    if not video or not video.video_path or not os.path.exists(video.video_path):
+        raise HTTPException(status_code=404, detail="Vídeo original não disponível em disco.")
+    box = FacecamDetector().detect_facecam_box(video.video_path)
+    return {
+        "detected": bool(box.get("detected")),
+        "corner": box.get("corner"),
+        "src": {"x": box.get("rel_x"), "y": box.get("rel_y"), "w": box.get("rel_w"), "h": box.get("rel_h")},
+    }
 
 
 @app.get("/api/clips/{clip_id}/export-pack")

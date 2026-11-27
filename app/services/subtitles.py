@@ -164,6 +164,8 @@ class SubtitleEngine:
         outline_w = int(style.get("outline_width", 6))
         shadow_d = int(style.get("shadow_depth", 3))
         margin_v = int(style.get("margin_v", 460))
+        margin_l = max(0, int(style.get("margin_l", 50)))
+        margin_r = max(0, int(style.get("margin_r", 50)))
         mode = style.get("style_mode", "word_highlight")
 
         border_style = int(style.get("border_style", 3 if mode == "box_caption" else 1))
@@ -185,7 +187,7 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Main,{font_name},{font_size},{primary_bgr},{highlight_bgr},{outline_bgr},{back_color},-1,0,0,0,100,100,0,0,{border_style},{outline_w},{shadow_d},2,50,50,{margin_v},1
+Style: Main,{font_name},{font_size},{primary_bgr},{highlight_bgr},{outline_bgr},{back_color},-1,0,0,0,100,100,0,0,{border_style},{outline_w},{shadow_d},2,{margin_l},{margin_r},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

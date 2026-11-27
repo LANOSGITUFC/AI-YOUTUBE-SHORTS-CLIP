@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.database.models import ClipSegment, SourceVideo, SystemSetting, BrandKit
 from app.services.subtitles import SubtitleEngine, DEFAULT_SUBTITLE_STYLE
 from app.services.facecam_detector import FacecamDetector
+from app.services.layout_engine import normalize_layout, build_custom_layout_filter, caption_style_overrides
 from app.services.effects import VideoEffectsEngine
 
 CLIPS_DIR = "./data/clips"
@@ -218,6 +219,12 @@ class VideoEditor:
         if style_override:
             preset.update(style_override)
 
+        # Layout personalizado do editor visual (câmera/gameplay/legenda arrastáveis)
+        custom_layout = normalize_layout(ed_cfg.get("layout"))
+        if custom_layout:
+            preset.pop("position_y", None)
+            preset.update(caption_style_overrides(custom_layout))
+
         use_subtitles = bool(ed_cfg.get("caption_enabled", preset.get("enable_subtitles", True)))
         motion_type = str(ed_cfg.get("motion_type") or ("punch-in" if (enable_vfx if enable_vfx is not None else preset.get("enable_vfx", False)) else "none"))
         transition_type = str(ed_cfg.get("transition_type") or "hard-cut")
@@ -289,6 +296,10 @@ class VideoEditor:
 
         # 4. Detecta facecam para split_screen
         crop_mode = clip.crop_mode or "split_screen"
+        if custom_layout:
+            crop_mode = "custom"
+            framing = dict(framing)
+            framing["layout"] = custom_layout
         facecam_box = None
         if crop_mode == "split_screen" and not framing.get("camX"):
             try:
@@ -646,6 +657,9 @@ class VideoEditor:
         output_label: str = "[v]",
     ) -> str:
         fr = framing or {}
+        if crop_mode == "custom":
+            return build_custom_layout_filter(fr.get("layout") or {}, input_label=input_label, output_label=output_label)
+
         if crop_mode == "split_screen":
             if fr.get("camW") or fr.get("camX"):
                 rel_w = max(0.18, min(0.75, float(fr.get("camW", 0.36))))
