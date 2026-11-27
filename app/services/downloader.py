@@ -196,7 +196,15 @@ class VideoDownloader:
             if not os.path.exists(final_video_path) or os.path.getsize(final_video_path) <= 50000:
                 hint = ""
                 if "Sign in to confirm" in last_stderr or "403" in last_stderr:
-                    hint = " (Dica: configure 'Cookies do Navegador' em Configurações ou coloque data/cookies.txt)"
+                    if "--cookies-from-browser" in base_flags:
+                        b_idx = base_flags.index("--cookies-from-browser")
+                        auth_info = f"navegador '{base_flags[b_idx + 1]}'"
+                    elif "--cookies" in base_flags:
+                        diag = validate_cookies_file(COOKIES_FILE)
+                        auth_info = f"data/cookies.txt ({diag.get('reason', 'presente')})"
+                    else:
+                        auth_info = "NENHUM cookie configurado"
+                    hint = f" [Auth usada: {auth_info}]"
                 raise RuntimeError(f"Falha ao baixar vídeo: {last_stderr[-350:]}{hint}")
 
             duration = self._get_video_duration(final_video_path)
