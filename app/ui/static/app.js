@@ -2381,8 +2381,8 @@ async function loadAnalyticsAndStorageView() {
     const kpiEl = document.getElementById('analyticsKpiGrid');
     if (kpiEl) {
       kpiEl.innerHTML = `
-        <div class="exp-winner-card"><div class="exp-winner-label">Views Totais</div><div class="exp-winner-val">${Number(an.total_views || 0).toLocaleString('pt-BR')}</div><div class="exp-winner-sub">${an.total_posts || 0} posts na grade</div></div>
-        <div class="exp-winner-card"><div class="exp-winner-label">Likes Totais</div><div class="exp-winner-val">${Number(an.total_likes || 0).toLocaleString('pt-BR')}</div><div class="exp-winner-sub">${Number(an.total_comments || 0).toLocaleString('pt-BR')} comentários</div></div>
+        <div class="exp-winner-card"><div class="exp-winner-label">Views Totais (YouTube)</div><div class="exp-winner-val">${Number(an.total_views || 0).toLocaleString('pt-BR')}</div><div class="exp-winner-sub">${Number(an.total_subscribers || 0).toLocaleString('pt-BR')} inscritos • ${an.total_posts || 0} na grade</div></div>
+        <div class="exp-winner-card"><div class="exp-winner-label">Produção Local</div><div class="exp-winner-val">${an.rendered_clips || 0}/${an.total_clips || 0} MP4</div><div class="exp-winner-sub">${Number(an.total_likes || 0).toLocaleString('pt-BR')} likes • ${Number(an.total_comments || 0).toLocaleString('pt-BR')} comentários</div></div>
         <div class="exp-winner-card"><div class="exp-winner-label">Retenção Média</div><div class="exp-winner-val">${an.avg_retention_pct || 0}%</div><div class="exp-winner-sub">Alimenta o Lab 7 Dias</div></div>
         <div class="exp-winner-card"><div class="exp-winner-label">Disco (Lives Brutas)</div><div class="exp-winner-val">${st.raw_size_mb || 0} MB</div><div class="exp-winner-sub">${st.raw_files_count || 0} arquivos locais • ${st.archived_count || 0} no Drive</div></div>
       `;
@@ -2390,17 +2390,34 @@ async function loadAnalyticsAndStorageView() {
 
     const bdEl = document.getElementById('analyticsBreakdowns');
     if (bdEl) {
-      const chRows = (an.by_channel || []).map((c) => `<div class="exp-metrics-row"><span><strong>${esc(c.channel_name)}</strong> (${c.posts} posts)</span><span>👁 ${c.views} • 👍 ${c.likes}</span></div>`).join('');
-      const scRows = (an.by_scene || []).map((s) => `<div class="exp-metrics-row"><span>Cena: <strong>${esc(s.scene)}</strong> (${s.posts})</span><span>👁 ${s.views} • 👍 ${s.likes}</span></div>`).join('');
-      bdEl.innerHTML = (chRows || '<div class="empty-state">Sem posts ainda.</div>') + (scRows ? `<div style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border);">${scRows}</div>` : '');
+      const chRows = (an.by_channel || []).map((c) => `
+        <div class="exp-metrics-row">
+          <span>
+            <strong>${esc(c.channel_name)}</strong>
+            <span class="badge ${c.oauth_connected ? 'badge-ok' : ''}" style="margin-left:4px;">${c.oauth_connected ? 'OAuth OK' : 'Sem OAuth'}</span>
+            <span style="color:var(--text-muted); margin-left:4px;">(${c.posts} posts • ${c.weight || 0}%)</span>
+          </span>
+          <span>👥 ${Number(c.subscribers || 0).toLocaleString('pt-BR')} • 👁 ${Number(c.channel_views || c.views || 0).toLocaleString('pt-BR')}</span>
+        </div>
+      `).join('');
+      const scRows = (an.by_scene || []).map((s) => `<div class="exp-metrics-row"><span>Cena: <strong>${esc(s.scene)}</strong> (${s.clips || s.posts || 0} clipes)</span><span>👁 ${Number(s.views || 0).toLocaleString('pt-BR')} • 👍 ${s.likes || 0}</span></div>`).join('');
+      bdEl.innerHTML = (chRows || '<div class="empty-state">Nenhuma conta YouTube cadastrada ainda.</div>') + (scRows ? `<div style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border);">${scRows}</div>` : '');
     }
 
     const topEl = document.getElementById('analyticsTopShorts');
     if (topEl) {
       const items = (an.top_shorts || []).slice(0, 8);
       topEl.innerHTML = items.length
-        ? items.map((s) => `<div class="exp-metrics-row"><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:65%;" title="${esc(s.title)}"><strong>${esc(s.title)}</strong> (${esc(s.streamer)})</span><span>👁 ${s.views} • ⏱ ${s.retention_pct}%</span></div>`).join('')
-        : '<div class="empty-state">Nenhum Short medido ainda. Lance métricas no Lab 7 Dias ou conecte OAuth.</div>';
+        ? items.map((s) => `
+          <div class="exp-metrics-row">
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:64%;" title="${esc(s.title)}">
+              ${s.youtube_url ? `<a href="${esc(s.youtube_url)}" target="_blank" rel="noopener" style="color:var(--text-main);"><strong>${esc(s.title)}</strong></a>` : `<strong>${esc(s.title)}</strong>`}
+              <span style="color:var(--text-muted);">(${esc(s.channel_name || s.streamer)})</span>
+            </span>
+            <span>👁 ${Number(s.views || 0).toLocaleString('pt-BR')} • 👍 ${s.likes || 0}${s.retention_pct ? ` • ⏱ ${s.retention_pct}%` : ''}</span>
+          </div>
+        `).join('')
+        : '<div class="empty-state">Clique em <strong>Sincronizar YouTube agora</strong> (para contas OAuth) ou lance views no <strong>Lab 7 Dias</strong>.</div>';
     }
 
     const bgmEl = document.getElementById('bgmTracksList');
@@ -2604,5 +2621,24 @@ async function exportSelectedClipsZip() {
     showToast(`Pacote .zip com ${ids.length} clipe(s) baixado!`, 'success');
   } catch (e) {
     showToast('Erro de rede ao exportar selecionados.', 'error');
+  }
+}
+
+async function syncAnalyticsYoutube() {
+  const btn = document.getElementById('btnSyncYtAnalytics');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sincronizando...'; }
+  try {
+    const res = await fetch('/api/analytics/sync-youtube', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao sincronizar YouTube Analytics.', 'error');
+      return;
+    }
+    showToast(data.message || 'YouTube sincronizado!', data.synced_channels > 0 ? 'success' : 'info');
+    await loadAnalyticsAndStorageView();
+  } catch (e) {
+    showToast('Erro de rede ao sincronizar YouTube.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Sincronizar YouTube agora'; }
   }
 }

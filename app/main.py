@@ -2107,36 +2107,191 @@ def get_ai_key_pool_status(db: Session = Depends(get_db)):
     return out
 
 
+YT_CHANNEL_STATS_KEY = "YT_CHANNEL_STATS_JSON"
+
+
+def _load_yt_channel_stats_cache(db: Session) -> Dict[str, Any]:
+    raw = _get_setting_val(db, YT_CHANNEL_STATS_KEY, "{}")
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+@app.post("/api/analytics/sync-youtube")
+def sync_all_youtube_analytics(db: Session = Depends(get_db)):
+    """
+    Sincroniza estatísticas reais direto da YouTube Data API v3 para TODAS as contas OAuth conectadas:
+    - Inscritos, views totais e total de vídeos de cada canal
+    - Views, likes e comentários de todos os Shorts agendados/publicados com youtube_video_id real
+    """
+    import datetime as _dt
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        from googleapiclient.discovery import build
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Bibliotecas Google API não instaladas.")
+
+    all_dests = db.query(DestinationChannel).order_by(DestinationChannel.id.asc()).all()
+    cache = _load_yt_channel_stats_cache(db)
+    synced_channels = 0
+    synced_videos = 0
+    errors = []
+    now = _dt.datetime.now(_dt.timezone.utc)
+
+    for dest in all_dests:
+        token_path = dest.oauth_credentials_path
+        if not token_path or not os.path.exists(token_path):
+            continue
+        try:
+            creds = Credentials.from_authorized_user_file(token_path)
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                with open(token_path, "w", encoding="utf-8") as f:
+                    f.write(creds.to_json())
+
+            youtube = build("youtube", "v3", credentials=creds)
+
+            # 1. Estatísticas do canal conectado
+            ch_resp = youtube.channels().list(part="snippet,statistics,contentDetails", mine=True).execute()
+            items = ch_resp.get("items") or []
+            recent_yt_videos = []
+            if items:
+                ch_item = items[0]
+                ch_stats = ch_item.get("statistics", {})
+                uploads_pl = (ch_item.get("contentDetails", {}).get("relatedPlaylists") or {}).get("uploads")
+                if uploads_pl:
+                    try:
+                        pl_resp = youtube.playlistItems().list(part="snippet,contentDetails", playlistId=uploads_pl, maxResults=10).execute()
+                        vids_ids = [it["contentDetails"]["videoId"] for it in (pl_resp.get("items") or []) if it.get("contentDetails", {}).get("videoId")]
+                        if vids_ids:
+                            v_resp = youtube.videos().list(part="snippet,statistics", id=",".join(vids_ids)).execute()
+                            for vi in (v_resp.get("items") or []):
+                                vs = vi.get("statistics", {})
+                                recent_yt_videos.append({
+                                    "youtube_video_id": vi.get("id"),
+                                    "title": vi.get("snippet", {}).get("title", "Vídeo"),
+                                    "channel_name": dest.name,
+                                    "views": int(vs.get("viewCount", 0) or 0),
+                                    "likes": int(vs.get("likeCount", 0) or 0),
+                                    "comments": int(vs.get("commentCount", 0) or 0),
+                                    "youtube_url": f"https://www.youtube.com/shorts/{vi.get('id')}",
+                                })
+                    except Exception:
+                        pass
+
+                cache[str(dest.id)] = {
+                    "youtube_channel_id": ch_item.get("id"),
+                    "title": ch_item.get("snippet", {}).get("title") or dest.name,
+                    "subscribers": int(ch_stats.get("subscriberCount", 0) or 0),
+                    "channel_views": int(ch_stats.get("viewCount", 0) or 0),
+                    "channel_videos": int(ch_stats.get("videoCount", 0) or 0),
+                    "recent_videos": recent_yt_videos,
+                    "synced_at": now.isoformat(),
+                }
+                synced_channels += 1
+
+            # 2. Estatísticas dos posts locais já publicados neste canal
+            posts = (
+                db.query(ScheduledPost)
+                .filter(ScheduledPost.destination_channel_id == dest.id)
+                .filter(ScheduledPost.youtube_video_id.isnot(None))
+                .all()
+            )
+            real_posts = [p for p in posts if p.youtube_video_id and not str(p.youtube_video_id).startswith("yt_sim_")]
+            vid_map = {p.youtube_video_id: p for p in real_posts}
+            ids = list(vid_map.keys())
+            for i in range(0, len(ids), 50):
+                batch = ids[i:i + 50]
+                vresp = youtube.videos().list(part="statistics", id=",".join(batch)).execute()
+                for item in vresp.get("items", []):
+                    post = vid_map.get(item.get("id"))
+                    stats = item.get("statistics", {})
+                    if post:
+                        post.views_count = int(stats.get("viewCount", 0) or 0)
+                        post.likes_count = int(stats.get("likeCount", 0) or 0)
+                        post.comments_count = int(stats.get("commentCount", 0) or 0)
+                        post.metrics_updated_at = now
+                        synced_videos += 1
+        except Exception as exc:
+            errors.append(f"{dest.name}: {exc}")
+
+    _upsert_setting(db, YT_CHANNEL_STATS_KEY, json.dumps(cache, ensure_ascii=False), "Cache de estatísticas reais dos canais YouTube")
+    db.commit()
+    return {
+        "status": "synced",
+        "synced_channels": synced_channels,
+        "synced_videos": synced_videos,
+        "errors": errors,
+        "message": (
+            f"{synced_channels} conta(s) e {synced_videos} vídeo(s) sincronizado(s) com o YouTube!"
+            if synced_channels > 0
+            else "Nenhuma conta com OAuth conectado encontrada. Conecte suas contas em 'Contas YouTube' para puxar views reais."
+        ),
+    }
+
+
 @app.get("/api/analytics/overview")
 def get_analytics_overview(db: Session = Depends(get_db)):
     """
     Painel real de Analytics (alimenta também os testes do Lab 7 Dias):
-    Views, likes, comentários, retenção média, top Shorts, breakdown por canal e por streamer.
+    Views, likes, comentários, retenção média, estatísticas reais dos canais YouTube conectados,
+    produção local, top Shorts, breakdown por canal, por streamer e por cena.
     """
     from collections import defaultdict
     posts = db.query(ScheduledPost).filter(ScheduledPost.status != "cancelled").all()
     all_dests = db.query(DestinationChannel).order_by(DestinationChannel.id.asc()).all()
+    all_clips = db.query(ClipSegment).all()
+    yt_cache = _load_yt_channel_stats_cache(db)
 
     total_views = 0
     total_likes = 0
     total_comments = 0
+    total_channel_views = 0
+    total_subscribers = 0
     ret_values = []
-    by_channel: Dict[int, Dict[str, Any]] = {
-        d.id: {
+    by_channel: Dict[int, Dict[str, Any]] = {}
+    recent_yt_pool = []
+
+    for d in all_dests:
+        cached = yt_cache.get(str(d.id), {})
+        oauth_ok = bool(d.oauth_credentials_path and os.path.exists(d.oauth_credentials_path))
+        ch_views = int(cached.get("channel_views", 0) or 0)
+        subs = int(cached.get("subscribers", 0) or 0)
+        total_channel_views += ch_views
+        total_subscribers += subs
+        recent_yt_pool.extend(cached.get("recent_videos") or [])
+        by_channel[d.id] = {
             "channel_id": d.id,
             "channel_name": d.name,
             "is_active": bool(d.is_active),
+            "oauth_connected": oauth_ok,
             "weight": int(d.weight or 0),
+            "subscribers": subs,
+            "channel_views": ch_views,
+            "channel_videos": int(cached.get("channel_videos", 0) or 0),
+            "synced_at": cached.get("synced_at"),
             "posts": 0,
             "views": 0,
             "likes": 0,
             "comments": 0,
         }
-        for d in all_dests
-    }
+
     by_streamer: Dict[str, Dict[str, Any]] = {}
-    by_scene: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"scene": "", "posts": 0, "views": 0, "likes": 0})
+    by_scene: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"scene": "", "posts": 0, "clips": 0, "views": 0, "likes": 0})
     top_shorts = []
+
+    # Inclui contagem local de clipes por cena e por streamer (mesmo antes de agendar)
+    for c in all_clips:
+        sc = c.crop_mode or "split_screen"
+        by_scene[sc]["scene"] = sc
+        by_scene[sc]["clips"] += 1
+        st_name = c.video.channel.name if (c.video and c.video.channel) else "Streamer"
+        if st_name not in by_streamer:
+            by_streamer[st_name] = {"streamer": st_name, "clips": 0, "posts": 0, "views": 0, "likes": 0}
+        by_streamer[st_name]["clips"] += 1
 
     for p in posts:
         v = int(getattr(p, "views_count", 0) or 0)
@@ -2152,7 +2307,21 @@ def get_analytics_overview(db: Session = Depends(get_db)):
         ch_id = p.destination_channel_id
         ch_name = p.destination_channel.name if p.destination_channel else f"Canal #{ch_id}"
         if ch_id not in by_channel:
-            by_channel[ch_id] = {"channel_id": ch_id, "channel_name": ch_name, "posts": 0, "views": 0, "likes": 0, "comments": 0}
+            by_channel[ch_id] = {
+                "channel_id": ch_id,
+                "channel_name": ch_name,
+                "is_active": True,
+                "oauth_connected": False,
+                "weight": 0,
+                "subscribers": 0,
+                "channel_views": 0,
+                "channel_videos": 0,
+                "synced_at": None,
+                "posts": 0,
+                "views": 0,
+                "likes": 0,
+                "comments": 0,
+            }
         by_channel[ch_id]["posts"] += 1
         by_channel[ch_id]["views"] += v
         by_channel[ch_id]["likes"] += lk
@@ -2161,7 +2330,7 @@ def get_analytics_overview(db: Session = Depends(get_db)):
         if p.clip:
             st_name = p.clip.video.channel.name if (p.clip.video and p.clip.video.channel) else "Streamer"
             if st_name not in by_streamer:
-                by_streamer[st_name] = {"streamer": st_name, "posts": 0, "views": 0, "likes": 0}
+                by_streamer[st_name] = {"streamer": st_name, "clips": 0, "posts": 0, "views": 0, "likes": 0}
             by_streamer[st_name]["posts"] += 1
             by_streamer[st_name]["views"] += v
             by_streamer[st_name]["likes"] += lk
@@ -2187,16 +2356,39 @@ def get_analytics_overview(db: Session = Depends(get_db)):
                 "youtube_url": p.youtube_url,
             })
 
+    # Mescla vídeos reais recentes dos canais conectados caso existam no YouTube
+    existing_yt_urls = {s.get("youtube_url") for s in top_shorts if s.get("youtube_url")}
+    for rv in recent_yt_pool:
+        if rv.get("youtube_url") not in existing_yt_urls:
+            top_shorts.append({
+                "post_id": None,
+                "clip_id": None,
+                "title": rv.get("title", "Short YouTube"),
+                "channel_name": rv.get("channel_name", "YouTube"),
+                "streamer": "YouTube",
+                "crop_mode": "youtube",
+                "status": "published",
+                "views": int(rv.get("views", 0) or 0),
+                "likes": int(rv.get("likes", 0) or 0),
+                "comments": int(rv.get("comments", 0) or 0),
+                "retention_pct": 0.0,
+                "youtube_url": rv.get("youtube_url"),
+            })
+
     top_shorts.sort(key=lambda x: (x["views"], x["likes"], x["retention_pct"]), reverse=True)
     return {
         "total_posts": len(posts),
-        "total_views": total_views,
+        "total_clips": len(all_clips),
+        "rendered_clips": sum(1 for c in all_clips if _is_valid_mp4(c.clip_path)),
+        "total_views": total_views or total_channel_views,
+        "total_channel_views": total_channel_views,
+        "total_subscribers": total_subscribers,
         "total_likes": total_likes,
         "total_comments": total_comments,
         "avg_retention_pct": round(sum(ret_values) / len(ret_values), 1) if ret_values else 0.0,
-        "by_channel": sorted(by_channel.values(), key=lambda x: x["views"], reverse=True),
-        "by_streamer": sorted(by_streamer.values(), key=lambda x: x["views"], reverse=True),
-        "by_scene": sorted(by_scene.values(), key=lambda x: x["views"], reverse=True),
+        "by_channel": sorted(by_channel.values(), key=lambda x: (x["channel_views"], x["views"], x["posts"]), reverse=True),
+        "by_streamer": sorted(by_streamer.values(), key=lambda x: (x["views"], x["clips"]), reverse=True),
+        "by_scene": sorted(by_scene.values(), key=lambda x: (x["views"], x["clips"]), reverse=True),
         "top_shorts": top_shorts[:15],
     }
 

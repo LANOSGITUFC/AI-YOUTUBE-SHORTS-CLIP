@@ -366,7 +366,10 @@
               <h2 class="section-title">Analytics Real, Biblioteca BGM & Arquivo no Google Drive</h2>
               <p class="section-desc">Acompanhe views/retenção por canal, streamer e cena (integrado ao Lab 7 Dias), gerencie trilhas BGM com auto-ducking e arquive lives processadas no Drive sem perder cenas inéditas.</p>
             </div>
-            <button class="btn btn-secondary btn-sm" onclick="loadAnalyticsAndStorageView()">Atualizar painel</button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-primary btn-sm" id="btnSyncYtAnalytics" onclick="syncAnalyticsYoutube()">Sincronizar YouTube agora</button>
+              <button class="btn btn-secondary btn-sm" onclick="loadAnalyticsAndStorageView()">Atualizar painel</button>
+            </div>
           </div>
 
           <div id="analyticsKpiGrid" class="exp-winners-grid"></div>
