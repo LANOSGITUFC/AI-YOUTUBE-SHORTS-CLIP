@@ -54,11 +54,30 @@ class PipelineWorker:
             except Exception as e:
                 logger.error(f"Erro no monitor: {e}")
 
-            # 2. Processar vídeos descobertos (baixa até 1 por ciclo para não travar CPU)
-            pending_video = db.query(SourceVideo).filter(SourceVideo.status == "discovered").first()
+            # 2. Processar vídeos descobertos (alterna entre streamers para misturar cortes)
+            discovered_videos = (
+                db.query(SourceVideo)
+                .filter(SourceVideo.status == "discovered")
+                .order_by(SourceVideo.published_at.desc())
+                .all()
+            )
+            pending_video = None
+            if discovered_videos:
+                # Conta quantos vídeos já foram processados por streamer para dar vez aos outros
+                processed_counts = {}
+                for v in discovered_videos:
+                    if v.channel_id not in processed_counts:
+                        processed_counts[v.channel_id] = (
+                            db.query(SourceVideo)
+                            .filter(SourceVideo.channel_id == v.channel_id)
+                            .filter(SourceVideo.status.in_(["downloaded", "transcribing", "transcribed", "processed"]))
+                            .count()
+                        )
+                pending_video = min(discovered_videos, key=lambda v: processed_counts.get(v.channel_id, 0))
+
             if pending_video:
                 try:
-                    logger.info(f"Baixando vídeo: {pending_video.title}")
+                    logger.info(f"Baixando vídeo ({pending_video.channel_id}): {pending_video.title}")
                     downloader.download_video(pending_video.id)
                     results["downloads"] += 1
 
@@ -72,8 +91,34 @@ class PipelineWorker:
                 except Exception as e:
                     logger.error(f"Erro no pipeline do vídeo {pending_video.id}: {traceback.format_exc()}")
 
-            # 3. Renderizar clipes analisados pendentes
-            pending_clip = db.query(ClipSegment).filter(ClipSegment.status == "analyzed").first()
+            # 3. Renderizar clipes analisados pendentes (alternando entre streamers)
+            analyzed_clips = (
+                db.query(ClipSegment)
+                .filter(ClipSegment.status == "analyzed")
+                .order_by(ClipSegment.virality_score.desc())
+                .all()
+            )
+            pending_clip = None
+            if analyzed_clips:
+                rendered_counts = {}
+                for c in analyzed_clips:
+                    ch_id = c.video.channel_id if c.video else str(c.video_id)
+                    if ch_id not in rendered_counts:
+                        rendered_counts[ch_id] = (
+                            db.query(ClipSegment)
+                            .join(SourceVideo, ClipSegment.video_id == SourceVideo.id)
+                            .filter(SourceVideo.channel_id == ch_id)
+                            .filter(ClipSegment.status.in_(["rendered", "scheduled", "published"]))
+                            .count()
+                        )
+                pending_clip = min(
+                    analyzed_clips,
+                    key=lambda c: (
+                        rendered_counts.get(c.video.channel_id if c.video else str(c.video_id), 0),
+                        -(c.virality_score or 0)
+                    )
+                )
+
             if pending_clip:
                 try:
                     logger.info(f"Renderizando clipe 9:16 #{pending_clip.id}: {pending_clip.title}")

@@ -117,16 +117,37 @@ class PostScheduler:
         if not active_channels:
             return 0
 
+        from collections import defaultdict, deque
+        from sqlalchemy.orm import joinedload
+
         unassigned_clips = (
             self.db.query(ClipSegment)
+            .options(joinedload(ClipSegment.video))
             .filter(ClipSegment.status == "rendered")
             .order_by(ClipSegment.virality_score.desc())
             .all()
         )
 
+        # Agrupa por streamer (channel_id de origem) e intercala 1 de cada por rodada
+        by_streamer: Dict[str, deque] = defaultdict(deque)
+        for clip in unassigned_clips:
+            streamer_key = clip.video.channel_id if clip.video else str(clip.video_id)
+            by_streamer[streamer_key].append(clip)
+
+        mixed_clips: List[ClipSegment] = []
+        queues = list(by_streamer.values())
+        while queues:
+            next_queues = []
+            for q in queues:
+                if q:
+                    mixed_clips.append(q.popleft())
+                if q:
+                    next_queues.append(q)
+            queues = next_queues
+
         scheduled_count = 0
 
-        for clip in unassigned_clips:
+        for clip in mixed_clips:
             best_channel = None
             best_score: Optional[tuple] = None
 
