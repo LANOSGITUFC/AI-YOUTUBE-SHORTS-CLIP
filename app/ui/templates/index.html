@@ -3,165 +3,295 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Shorts Clipper - Mission Control 24/7</title>
+  <title>ClipperStudio Pro 24/7 — AI YouTube Shorts & Streamer Automation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
   <script>
     tailwind.config = {
       darkMode: 'class',
       theme: {
         extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
           colors: {
-            brand: { 500: '#ef4444', 600: '#dc2626' },
-            dark: { 800: '#18181b', 900: '#09090b', 700: '#27272a' }
+            brand: {
+              50: '#fff1f2',
+              500: '#f43f5e',
+              600: '#e11d48',
+              700: '#be123c',
+            },
+            studio: {
+              950: '#07090e',
+              900: '#0c1017',
+              850: '#111722',
+              800: '#161e2e',
+              700: '#232f45',
+              600: '#334155',
+            }
           }
         }
       }
     }
   </script>
+  <style>
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0c1017; }
+    ::-webkit-scrollbar-thumb { background: #232f45; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    
+    .glow-rose {
+      box-shadow: 0 0 25px -5px rgba(244, 63, 94, 0.35);
+    }
+    .glow-cyan {
+      box-shadow: 0 0 25px -5px rgba(6, 182, 212, 0.35);
+    }
+    .phone-mockup {
+      aspect-ratio: 9/16;
+      border: 6px solid #232f45;
+      border-radius: 28px;
+      overflow: hidden;
+      position: relative;
+    }
+  </style>
 </head>
-<body class="bg-dark-900 text-slate-100 min-h-screen font-sans flex flex-col">
+<body class="bg-studio-950 text-slate-100 min-h-screen font-sans flex flex-col antialiased selection:bg-brand-500 selection:text-white">
 
   <!-- TOPBAR -->
-  <header class="border-b border-dark-700 bg-dark-800/80 backdrop-blur sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
-    <div class="flex items-center space-x-3">
-      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-red-600 to-purple-600 flex items-center justify-center shadow-lg shadow-red-500/20">
-        <i class="fa-solid fa-scissors text-white text-lg"></i>
+  <header class="border-b border-studio-800 bg-studio-900/90 backdrop-blur-md sticky top-0 z-50 px-6 py-3.5 flex items-center justify-between">
+    <div class="flex items-center space-x-4">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 via-rose-600 to-amber-500 flex items-center justify-center shadow-lg shadow-brand-500/20">
+        <i class="fa-solid fa-bolt-lightning text-white text-lg"></i>
       </div>
       <div>
-        <h1 class="text-lg font-bold tracking-tight flex items-center gap-2">
-          AI YouTube Shorts Clipper
-          <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 24/7 Online
+        <div class="flex items-center gap-2.5">
+          <h1 class="text-base font-extrabold tracking-tight text-white">CLIPPER STUDIO PRO</h1>
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 uppercase tracking-wider">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span> 24/7 Autônomo
           </span>
-        </h1>
-        <p class="text-xs text-slate-400">Monitoramento • Deduplicação de Trechos • Multi-IA (Claude Code & Antigravity) • 4 Vídeos/Dia</p>
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30">
+            Deduplicação Ativa
+          </span>
+        </div>
+        <p class="text-xs text-slate-400">9 Streamers Monitorados • 4 Vídeos/Dia x 7 Dias • Antigravity + Claude Code Dual Engine</p>
       </div>
     </div>
 
     <div class="flex items-center space-x-3">
-      <button onclick="triggerCheckChannels()" class="px-3.5 py-2 rounded-lg bg-dark-700 hover:bg-dark-600 text-xs font-semibold border border-slate-700 transition flex items-center gap-2">
-        <i class="fa-solid fa-arrows-rotate"></i> Varrer 9 Canais
+      <div class="hidden md:flex items-center space-x-2 text-xs font-mono bg-studio-850 px-3 py-1.5 rounded-lg border border-studio-700/60 text-slate-400">
+        <span class="text-slate-500">MCP:</span> <span class="text-cyan-400 font-bold">READY</span>
+        <span class="text-slate-600">|</span>
+        <span class="text-slate-500">CLAUDE:</span> <span class="text-amber-400 font-bold">PAIRED</span>
+      </div>
+      <button onclick="triggerCheckChannels()" class="px-4 py-2 rounded-lg bg-studio-800 hover:bg-studio-700 text-xs font-semibold border border-studio-700 text-slate-200 transition flex items-center gap-2">
+        <i class="fa-solid fa-arrows-rotate text-brand-500"></i> Varrer 9 Canais
       </button>
-      <button onclick="triggerPipelineCycle()" class="px-3.5 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-xs font-semibold shadow-lg shadow-red-600/30 transition flex items-center gap-2">
-        <i class="fa-solid fa-play"></i> Executar Ciclo da Esteira
+      <button onclick="triggerPipelineCycle()" class="px-4 py-2 rounded-lg bg-gradient-to-r from-brand-600 to-rose-600 hover:from-brand-500 hover:to-rose-500 text-xs font-bold text-white shadow-lg glow-rose transition flex items-center gap-2">
+        <i class="fa-solid fa-play"></i> Disparar Esteira
       </button>
     </div>
   </header>
 
-  <!-- MAIN CONTAINER -->
-  <main class="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
+  <!-- WORKSPACE BODY -->
+  <main class="flex-1 p-6 max-w-[1500px] mx-auto w-full space-y-6">
 
-    <!-- KPI STATS -->
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-4" id="statsGrid">
-      <div class="bg-dark-800 border border-dark-700 p-4 rounded-xl shadow-sm">
-        <span class="text-xs text-slate-400 font-medium">Canais Monitorados</span>
-        <div class="text-2xl font-bold text-white mt-1" id="kpiChannels">9</div>
-        <span class="text-[11px] text-emerald-400">Alanzoka, Paulinho, Lipao...</span>
+    <!-- KPI DASHBOARD -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
+        <div class="flex justify-between items-center text-slate-400 mb-1">
+          <span class="text-xs font-medium uppercase tracking-wider">Canais 24/7</span>
+          <i class="fa-brands fa-youtube text-brand-500"></i>
+        </div>
+        <div class="text-2xl font-extrabold text-white" id="kpiChannels">9</div>
+        <div class="text-[11px] text-emerald-400 mt-1 font-medium flex items-center gap-1">
+          <i class="fa-solid fa-circle-check text-[9px]"></i> Feeds RSS Ativos
+        </div>
       </div>
-      <div class="bg-dark-800 border border-dark-700 p-4 rounded-xl shadow-sm">
-        <span class="text-xs text-slate-400 font-medium">Vídeos Rastreados</span>
-        <div class="text-2xl font-bold text-white mt-1" id="kpiVideos">0</div>
-        <span class="text-[11px] text-slate-400">via RSS 24/7 sem cota</span>
+
+      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
+        <div class="flex justify-between items-center text-slate-400 mb-1">
+          <span class="text-xs font-medium uppercase tracking-wider">Vídeos Indexados</span>
+          <i class="fa-solid fa-layer-group text-cyan-400"></i>
+        </div>
+        <div class="text-2xl font-extrabold text-white" id="kpiVideos">135</div>
+        <div class="text-[11px] text-slate-400 mt-1">Alanzoka, Paulinho, Lipao...</div>
       </div>
-      <div class="bg-dark-800 border border-dark-700 p-4 rounded-xl shadow-sm">
-        <span class="text-xs text-slate-400 font-medium">Clipes Registrados</span>
-        <div class="text-2xl font-bold text-white mt-1" id="kpiClips">0</div>
-        <span class="text-[11px] text-indigo-400">Deduplicação Ativa</span>
+
+      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
+        <div class="flex justify-between items-center text-slate-400 mb-1">
+          <span class="text-xs font-medium uppercase tracking-wider">Cortes Salvos</span>
+          <i class="fa-solid fa-scissors text-purple-400"></i>
+        </div>
+        <div class="text-2xl font-extrabold text-white" id="kpiClips">0</div>
+        <div class="text-[11px] text-purple-400 mt-1 font-medium">Anti-Sobreposição Ativa</div>
       </div>
-      <div class="bg-dark-800 border border-dark-700 p-4 rounded-xl shadow-sm">
-        <span class="text-xs text-slate-400 font-medium">Clipes Renderizados 9:16</span>
-        <div class="text-2xl font-bold text-white mt-1" id="kpiRendered">0</div>
-        <span class="text-[11px] text-purple-400">Com legendas dinâmicas</span>
+
+      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
+        <div class="flex justify-between items-center text-slate-400 mb-1">
+          <span class="text-xs font-medium uppercase tracking-wider">Renderizados 9:16</span>
+          <i class="fa-solid fa-film text-amber-400"></i>
+        </div>
+        <div class="text-2xl font-extrabold text-white" id="kpiRendered">0</div>
+        <div class="text-[11px] text-amber-400 mt-1">Gamer Split + Legenda ASS</div>
       </div>
-      <div class="bg-dark-800 border border-dark-700 p-4 rounded-xl shadow-sm">
-        <span class="text-xs text-slate-400 font-medium">Grade Agendada (4/dia)</span>
-        <div class="text-2xl font-bold text-white mt-1" id="kpiScheduled">0</div>
-        <span class="text-[11px] text-amber-400">Próximos 7 dias</span>
+
+      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
+        <div class="flex justify-between items-center text-slate-400 mb-1">
+          <span class="text-xs font-medium uppercase tracking-wider">Slots Agendados</span>
+          <i class="fa-solid fa-calendar-check text-rose-400"></i>
+        </div>
+        <div class="text-2xl font-extrabold text-white" id="kpiScheduled">0</div>
+        <div class="text-[11px] text-rose-400 mt-1 font-medium">Meta: 4/dia (28 semanais)</div>
       </div>
     </div>
 
-    <!-- TABS -->
-    <div class="border-b border-dark-700 flex space-x-6">
-      <button onclick="switchTab('channels')" id="tabBtnChannels" class="pb-3 text-sm font-semibold border-b-2 border-red-500 text-white flex items-center gap-2">
-        <i class="fa-brands fa-youtube text-red-500"></i> 9 Canais Monitorados
+    <!-- STUDIO TABS -->
+    <div class="border-b border-studio-800 flex space-x-8 text-sm">
+      <button onclick="switchTab('channels')" id="tabBtnChannels" class="pb-3 font-bold border-b-2 border-brand-500 text-white flex items-center gap-2.5 transition">
+        <i class="fa-brands fa-youtube text-brand-500"></i> 9 Canais Monitorados
       </button>
-      <button onclick="switchTab('calendar')" id="tabBtnCalendar" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2">
-        <i class="fa-regular fa-calendar-days text-amber-500"></i> Grade de 4 Vídeos/Dia (7 Dias)
+      <button onclick="switchTab('calendar')" id="tabBtnCalendar" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
+        <i class="fa-regular fa-calendar-days text-amber-400"></i> Grade de 4 Vídeos/Dia (7 Dias)
       </button>
-      <button onclick="switchTab('clips')" id="tabBtnClips" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2">
-        <i class="fa-solid fa-film text-purple-500"></i> Clipes & Deduplicação
+      <button onclick="switchTab('clips')" id="tabBtnClips" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
+        <i class="fa-solid fa-shield-halved text-purple-400"></i> Deduplicação & Clipes
       </button>
-      <button onclick="switchTab('aibus')" id="tabBtnAibus" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2">
-        <i class="fa-solid fa-robot text-cyan-400"></i> Multi-IA Bus (Claude Code Bridge)
+      <button onclick="switchTab('timeline')" id="tabBtnTimeline" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
+        <i class="fa-solid fa-chart-gantt text-emerald-400"></i> Inspetor de Linha do Tempo
+      </button>
+      <button onclick="switchTab('aibus')" id="tabBtnAibus" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
+        <i class="fa-solid fa-terminal text-cyan-400"></i> Console Claude Code & Multi-IA
       </button>
     </div>
 
-    <!-- SECTION: CANAIS -->
-    <div id="tabContentChannels" class="space-y-4">
+    <!-- TAB 1: 9 CANAIS MONITORADOS -->
+    <section id="tabContentChannels" class="space-y-4">
+      <div class="flex justify-between items-center">
+        <div>
+          <h2 class="text-base font-bold text-white">Canais de Streamers Sob Vigilância 24 Horas</h2>
+          <p class="text-xs text-slate-400">Detecção instantânea de novos vídeos e lives sem consumo de cota da API do YouTube</p>
+        </div>
+      </div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="channelsList">
-        <!-- Renderizado dinamicamente via JS -->
+        <!-- Preenchido via JS -->
       </div>
-    </div>
+    </section>
 
-    <!-- SECTION: CALENDAR 4 VÍDEOS/DIA X 7 DIAS -->
-    <div id="tabContentCalendar" class="space-y-4 hidden">
-      <div class="bg-dark-800 border border-dark-700 rounded-xl p-5">
-        <div class="flex items-center justify-between mb-4">
+    <!-- TAB 2: CALENDÁRIO 4 VÍDEOS/DIA X 7 DIAS -->
+    <section id="tabContentCalendar" class="space-y-4 hidden">
+      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-4 border-b border-studio-800">
           <div>
             <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <i class="fa-solid fa-calendar-check text-amber-400"></i> Matriz Semanal de Agendamento (28 Slots)
+              <i class="fa-solid fa-calendar-week text-amber-400"></i>
+              Matriz de Agendamento Semanal (28 Slots de Pico)
             </h2>
-            <p class="text-xs text-slate-400">4 publicações diárias automáticas em horários de pico (11:30, 15:00, 18:30, 21:00 BRT)</p>
+            <p class="text-xs text-slate-400 mt-1">
+              Publicações automáticas em 4 horários de maior engajamento gamer: <strong>11:30</strong> (Almoço), <strong>15:00</strong> (Tarde), <strong>18:30</strong> (Volta do Trabalho/Escola) e <strong>21:00</strong> (Prime Time).
+            </p>
           </div>
-          <button onclick="autoFillSchedule()" class="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-xs font-semibold text-white">
-            Auto-Preencher Vagas com Clipes Renderizados
+          <button onclick="autoFillSchedule()" class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-bold text-slate-950 transition flex items-center gap-2 shadow-lg shadow-amber-500/20">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Preencher Grade Semanal
           </button>
         </div>
         <div class="overflow-x-auto">
-          <div id="calendarGrid" class="grid grid-cols-1 md:grid-cols-7 gap-3 min-w-[700px]">
-            <!-- Renderizado dinamicamente via JS -->
+          <div id="calendarGrid" class="grid grid-cols-1 md:grid-cols-7 gap-3 min-w-[900px]">
+            <!-- Renderizado dinamicamente -->
           </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- SECTION: CLIPS & DEDUPLICAÇÃO -->
-    <div id="tabContentClips" class="space-y-4 hidden">
-      <div class="bg-dark-800 border border-dark-700 rounded-xl p-5">
-        <h2 class="text-base font-bold text-white mb-2 flex items-center gap-2">
-          <i class="fa-solid fa-shield-halved text-emerald-400"></i> Memória de Cortes & Proteção Anti-Duplicidade
-        </h2>
-        <p class="text-xs text-slate-400 mb-4">
-          O sistema memoriza os segundos exatos de cada corte. Se Claude Code, Open Code ou o analisador tentar cortar um trecho já utilizado, o banco rejeita com bloqueio imediato.
-        </p>
-        <div id="clipsGrid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <!-- Renderizado via JS -->
-        </div>
-      </div>
-    </div>
-
-    <!-- SECTION: MULTI-IA BUS -->
-    <div id="tabContentAibus" class="space-y-4 hidden">
-      <div class="bg-dark-800 border border-dark-700 rounded-xl p-5">
-        <div class="flex items-center justify-between mb-3">
+    <!-- TAB 3: CLIPES & MEMÓRIA DE DEDUPLICAÇÃO -->
+    <section id="tabContentClips" class="space-y-4 hidden">
+      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6">
+        <div class="flex justify-between items-center mb-4">
           <div>
             <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <i class="fa-solid fa-network-wired text-cyan-400"></i> Barramento de Comunicação Multi-IA
+              <i class="fa-solid fa-database text-purple-400"></i>
+              Registro de Cortes & Proteção Anti-Duplicidade
             </h2>
-            <p class="text-xs text-slate-400">Histórico de eventos, tarefas e decisões trocadas entre Antigravity, Claude Code e Open Code</p>
+            <p class="text-xs text-slate-400">
+              O banco de dados memoriza cada segundo já usado. Nenhum trecho é reutilizado ou postado em duplicidade.
+            </p>
           </div>
-          <span class="text-xs px-2.5 py-1 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">MCP Server Ativo</span>
         </div>
-        <div class="bg-dark-900 border border-dark-700 rounded-lg p-3 font-mono text-xs max-h-96 overflow-y-auto space-y-2" id="aiBusLogs">
-          <!-- Renderizado via JS -->
+        <div id="clipsGrid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- Preenchido via JS -->
         </div>
       </div>
-    </div>
+    </section>
+
+    <!-- TAB 4: INSPETOR VISUAL DE LINHA DO TEMPO -->
+    <section id="tabContentTimeline" class="space-y-4 hidden">
+      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6 space-y-4">
+        <div>
+          <h2 class="text-base font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-chart-gantt text-emerald-400"></i>
+            Inspetor de Linha do Tempo (Trechos Usados vs. Trechos Virgens)
+          </h2>
+          <p class="text-xs text-slate-400">
+            Visualize onde estão os cortes existentes e onde a IA pode extrair novos Shorts sem sobreposição.
+          </p>
+        </div>
+        <div class="flex items-center gap-3">
+          <select id="videoSelectTimeline" onchange="loadVideoTimeline()" class="bg-studio-850 border border-studio-700 text-xs font-mono rounded-lg px-3 py-2 text-slate-200 w-full max-w-md">
+            <!-- Populado via JS -->
+          </select>
+          <button onclick="loadVideoTimeline()" class="px-3 py-2 rounded-lg bg-studio-800 hover:bg-studio-700 text-xs font-semibold text-slate-200 border border-studio-700">
+            Atualizar Gráfico
+          </button>
+        </div>
+        <div id="timelineContainer" class="p-4 bg-studio-950 border border-studio-800 rounded-xl space-y-4">
+          <div class="flex items-center justify-between text-xs text-slate-400 font-mono">
+            <span>00:00 (Início)</span>
+            <span id="timelineDuration">30:00 (Fim)</span>
+          </div>
+          <!-- Barra gráfica interativa -->
+          <div id="timelineBar" class="h-8 bg-emerald-500/20 border border-emerald-500/40 rounded-lg relative overflow-hidden flex items-center">
+            <!-- Blocos de corte renderizados aqui -->
+          </div>
+          <div class="flex gap-4 text-xs">
+            <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-3 rounded bg-emerald-500/30 border border-emerald-500"></span> Trecho Livre (Inédito)</span>
+            <span class="flex items-center gap-1.5 text-purple-400"><span class="w-3 h-3 rounded bg-purple-500 border border-purple-400"></span> Trecho Já Usado (Bloqueado)</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: CONSOLE CLAUDE CODE & MULTI-IA -->
+    <section id="tabContentAibus" class="space-y-4 hidden">
+      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6 space-y-4">
+        <div class="flex justify-between items-center">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-code-compare text-cyan-400"></i>
+              Console de Orquestração Antigravity ⇄ Claude Code
+            </h2>
+            <p class="text-xs text-slate-400">Eventos em tempo real, propostas de cortes e sincronização Git</p>
+          </div>
+          <span class="text-xs px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-mono">
+            /home/ldks/Documents/work-claude/
+          </span>
+        </div>
+
+        <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 font-mono text-xs max-h-96 overflow-y-auto space-y-2.5" id="aiBusLogs">
+          <!-- Logs renderizados via JS -->
+        </div>
+      </div>
+    </section>
 
   </main>
 
   <script>
+    let allVideos = [];
+
     async function fetchStats() {
       try {
         const res = await fetch('/api/status');
@@ -180,18 +310,18 @@
         const channels = await res.json();
         const container = document.getElementById('channelsList');
         container.innerHTML = channels.map(c => `
-          <div class="bg-dark-800 border border-dark-700 rounded-xl p-4 flex flex-col justify-between hover:border-slate-600 transition">
+          <div class="bg-studio-900 border border-studio-800 rounded-2xl p-4 flex flex-col justify-between hover:border-studio-700 transition">
             <div class="flex items-start justify-between">
               <div>
                 <h3 class="font-bold text-sm text-white">${c.name}</h3>
-                <span class="text-xs text-red-400 font-mono">${c.handle}</span>
+                <span class="text-xs text-brand-500 font-mono font-medium">${c.handle}</span>
               </div>
-              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400" title="Canal Ativo"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" title="Ativo 24/7"></span>
             </div>
-            <div class="mt-4 pt-3 border-t border-dark-700/60 flex items-center justify-between text-xs text-slate-400">
-              <span>${c.video_count} vídeos rastreados</span>
-              <a href="${c.url}" target="_blank" class="text-red-400 hover:text-red-300">
-                <i class="fa-brands fa-youtube"></i> Abrir Canal
+            <div class="mt-4 pt-3 border-t border-studio-800 flex items-center justify-between text-xs text-slate-400">
+              <span class="font-mono text-[11px] text-slate-300 font-semibold">${c.video_count} vídeos rastreados</span>
+              <a href="${c.url}" target="_blank" class="text-slate-400 hover:text-white transition flex items-center gap-1">
+                <i class="fa-brands fa-youtube text-brand-500"></i> YouTube
               </a>
             </div>
           </div>
@@ -207,21 +337,35 @@
         if (!data.matrix) return;
 
         container.innerHTML = data.matrix.map(day => `
-          <div class="bg-dark-900 border border-dark-700 rounded-lg p-3 space-y-2">
-            <div class="text-center border-b border-dark-700 pb-2">
-              <span class="text-xs font-bold text-slate-200 block">${day.date}</span>
-              <span class="text-[10px] text-slate-400 uppercase">${day.day_name}</span>
+          <div class="bg-studio-950 border border-studio-800 rounded-xl p-3 space-y-2.5">
+            <div class="text-center border-b border-studio-800 pb-2">
+              <span class="text-xs font-extrabold text-white block">${day.date}</span>
+              <span class="text-[10px] text-slate-400 uppercase font-bold tracking-wider">${day.day_name}</span>
             </div>
             <div class="space-y-2">
               ${day.slots.map(s => `
-                <div class="p-2 rounded border text-xs ${s.is_filled ? 'bg-amber-500/10 border-amber-500/40 text-amber-200' : 'bg-dark-800 border-dark-700 text-slate-500'}">
+                <div class="p-2.5 rounded-lg border text-xs transition ${
+                  s.is_filled 
+                    ? 'bg-amber-500/10 border-amber-500/40 text-amber-200' 
+                    : 'bg-studio-900 border-studio-800/80 text-slate-500'
+                }">
                   <div class="flex justify-between items-center font-bold">
-                    <span>${s.time}</span>
-                    <span class="text-[9px] px-1.5 py-0.5 rounded ${s.is_filled ? 'bg-amber-500/20 text-amber-300' : 'bg-dark-700 text-slate-400'}">
+                    <span class="font-mono text-[11px]">${s.time}</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                      s.is_filled ? 'bg-amber-500/20 text-amber-300' : 'bg-studio-800 text-slate-400'
+                    }">
                       ${s.is_filled ? 'AGENDADO' : 'VAGO'}
                     </span>
                   </div>
-                  ${s.is_filled ? `<p class="text-[11px] font-medium text-slate-200 mt-1 truncate" title="${s.clip.title}">${s.clip.title}</p>` : ''}
+                  ${s.is_filled ? `
+                    <p class="text-[11px] font-semibold text-white mt-1.5 line-clamp-2" title="${s.clip.title}">
+                      ${s.clip.title}
+                    </p>
+                    <div class="flex justify-between items-center text-[10px] text-slate-400 mt-2 pt-1 border-t border-amber-500/20 font-mono">
+                      <span>${s.clip.duration}s</span>
+                      <span class="text-amber-400 font-bold">Score ${s.clip.score}</span>
+                    </div>
+                  ` : ''}
                 </div>
               `).join('')}
             </div>
@@ -236,27 +380,72 @@
         const clips = await res.json();
         const container = document.getElementById('clipsGrid');
         if (!clips.length) {
-          container.innerHTML = '<p class="text-xs text-slate-400 col-span-3">Nenhum clipe gerado ainda. Clique em "Executar Ciclo da Esteira" ou envie tarefas pelo Claude Code.</p>';
+          container.innerHTML = '<p class="text-xs text-slate-400 col-span-3 py-8 text-center">Nenhum clipe gerado ainda. Clique em "Disparar Esteira" para processar o primeiro vídeo.</p>';
           return;
         }
         container.innerHTML = clips.map(c => `
-          <div class="bg-dark-900 border border-dark-700 rounded-xl p-3 flex flex-col justify-between">
+          <div class="bg-studio-950 border border-studio-800 rounded-2xl p-4 flex flex-col justify-between hover:border-studio-700 transition">
             <div>
               <div class="flex justify-between items-start mb-2">
-                <span class="text-xs font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                  Viral Score: ${c.score}
+                <span class="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  Score ${c.score}/100
                 </span>
                 <span class="text-[11px] text-slate-400 font-mono">${c.start}s - ${c.end}s (${c.duration}s)</span>
               </div>
-              <h4 class="font-bold text-sm text-white line-clamp-2">${c.title}</h4>
-              <p class="text-xs text-slate-400 mt-1 line-clamp-2">${c.hook || 'Sem gancho'}</p>
+              <h4 class="font-bold text-sm text-white line-clamp-2 mt-1">${c.title}</h4>
+              <p class="text-xs text-slate-400 mt-1 line-clamp-2 italic">"${c.hook || 'Momento de alta retenção'}"</p>
             </div>
-            <div class="mt-3 pt-2 border-t border-dark-700 flex justify-between items-center text-xs">
+            <div class="mt-4 pt-3 border-t border-studio-800 flex justify-between items-center text-xs">
               <span class="text-slate-400">Por: <strong class="text-cyan-400">${c.suggested_by}</strong></span>
-              <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] uppercase">${c.status}</span>
+              <span class="px-2 py-0.5 rounded font-mono text-[10px] uppercase font-bold ${
+                c.status === 'rendered' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-studio-800 text-slate-300'
+              }">${c.status}</span>
             </div>
           </div>
         `).join('');
+      } catch (e) { console.error(e); }
+    }
+
+    async function loadVideosForTimeline() {
+      try {
+        const res = await fetch('/api/videos');
+        allVideos = await res.json();
+        const sel = document.getElementById('videoSelectTimeline');
+        sel.innerHTML = allVideos.map(v => `
+          <option value="${v.id}">${v.title.slice(0, 45)}... (${v.channel_name})</option>
+        `).join('');
+        if (allVideos.length) {
+          loadVideoTimeline();
+        }
+      } catch (e) { console.error(e); }
+    }
+
+    async function loadVideoTimeline() {
+      const vidId = document.getElementById('videoSelectTimeline').value;
+      if (!vidId) return;
+
+      try {
+        const res = await fetch(`/api/videos/${vidId}/timeline`);
+        const data = await res.json();
+        const totalDuration = data.duration || 1800;
+
+        document.getElementById('timelineDuration').innerText = `${Math.floor(totalDuration/60)}:${Math.floor(totalDuration%60).toString().padStart(2, '0')}`;
+
+        const bar = document.getElementById('timelineBar');
+        bar.innerHTML = '';
+
+        // Renderiza blocos usados
+        data.used_segments.forEach(seg => {
+          const leftPct = (seg.start_time / totalDuration) * 100;
+          const widthPct = ((seg.end_time - seg.start_time) / totalDuration) * 100;
+          const block = document.createElement('div');
+          block.className = 'absolute h-full bg-purple-500 hover:bg-purple-400 transition cursor-pointer';
+          block.style.left = `${leftPct}%`;
+          block.style.width = `${Math.max(widthPct, 1)}%`;
+          block.title = `Corte #${seg.id}: ${seg.title} (${seg.start_time}s - ${seg.end_time}s)`;
+          bar.appendChild(block);
+        });
+
       } catch (e) { console.error(e); }
     }
 
@@ -266,48 +455,48 @@
         const events = await res.json();
         const container = document.getElementById('aiBusLogs');
         if (!events.length) {
-          container.innerHTML = '<span class="text-slate-500">// Aguardando primeiros eventos do barramento...</span>';
+          container.innerHTML = '<span class="text-slate-500">// Aguardando novos eventos...</span>';
           return;
         }
         container.innerHTML = events.map(e => `
-          <div class="p-2 border-b border-dark-800 flex items-start gap-2">
-            <span class="text-cyan-400">[${e.sender} &rarr; ${e.target}]</span>
-            <span class="text-amber-400 font-bold">${e.type}</span>
-            <span class="text-slate-300 flex-1 truncate">${JSON.stringify(e.payload)}</span>
-            <span class="text-slate-500 text-[10px]">${e.created_at.split('T')[1].slice(0, 8)}</span>
+          <div class="p-2.5 rounded-lg bg-studio-900/60 border border-studio-800 flex items-start gap-2.5">
+            <span class="text-cyan-400 font-bold">[${e.sender} &rarr; ${e.target}]</span>
+            <span class="text-amber-400 font-semibold">${e.type}</span>
+            <span class="text-slate-300 flex-1 truncate font-mono text-[11px]">${JSON.stringify(e.payload)}</span>
+            <span class="text-slate-500 text-[10px] font-mono">${e.created_at ? e.created_at.split('T')[1].slice(0, 8) : ''}</span>
           </div>
         `).join('');
       } catch (e) { console.error(e); }
     }
 
     function switchTab(tab) {
-      ['channels', 'calendar', 'clips', 'aibus'].forEach(t => {
+      ['channels', 'calendar', 'clips', 'timeline', 'aibus'].forEach(t => {
         const btn = document.getElementById('tabBtn' + t.charAt(0).toUpperCase() + t.slice(1));
         const content = document.getElementById('tabContent' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (!btn || !content) return;
         if (t === tab) {
-          btn.classList.add('border-red-500', 'text-white');
+          btn.classList.add('border-brand-500', 'text-white');
           btn.classList.remove('border-transparent', 'text-slate-400');
           content.classList.remove('hidden');
         } else {
-          btn.classList.remove('border-red-500', 'text-white');
+          btn.classList.remove('border-brand-500', 'text-white');
           btn.classList.add('border-transparent', 'text-slate-400');
           content.classList.add('hidden');
         }
       });
       if (tab === 'calendar') loadCalendar();
       if (tab === 'clips') loadClips();
+      if (tab === 'timeline') loadVideosForTimeline();
       if (tab === 'aibus') loadAIBusEvents();
     }
 
     async function triggerCheckChannels() {
-      alert('Iniciando varredura 24/7 nos 9 canais do YouTube via RSS/yt-dlp...');
       await fetch('/api/channels/check-now', { method: 'POST' });
       fetchStats();
       loadChannels();
     }
 
     async function triggerPipelineCycle() {
-      alert('Ciclo completo da esteira disparado em segundo plano!');
       await fetch('/api/pipeline/run-cycle', { method: 'POST' });
       setTimeout(fetchStats, 3000);
     }
@@ -315,7 +504,6 @@
     async function autoFillSchedule() {
       const res = await fetch('/api/scheduler/auto-fill', { method: 'POST' });
       const data = await res.json();
-      alert(data.message);
       loadCalendar();
       fetchStats();
     }
@@ -323,7 +511,7 @@
     // Inicialização
     fetchStats();
     loadChannels();
-    setInterval(fetchStats, 15000);
+    setInterval(fetchStats, 10000);
   </script>
 </body>
 </html>

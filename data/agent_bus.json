@@ -2,21 +2,15 @@
   "events": [
     {
       "id": 1,
-      "sender": "claude-code",
-      "target": "all",
-      "type": "CLIP_REGISTERED",
+      "sender": "antigravity",
+      "target": "claude-code",
+      "type": "TEST_EVENT",
       "payload": {
-        "clip_id": 1,
-        "video_id": "7mgGgcrCwvQ",
-        "start": 120.0,
-        "end": 165.0,
-        "title": "ALANZOKA PERDIDO NO GTA 6! 😱",
-        "score": 95,
-        "crop_mode": "split_screen"
+        "msg": "Hello Claude Code"
       },
       "status": "pending",
-      "time": "2026-11-27T19:58:51.611655"
+      "time": "2026-11-27T20:21:29.103179"
     }
   ],
-  "updated_at": "2026-11-27T19:58:51.623791"
+  "updated_at": "2026-11-27T20:21:29.106740+00:00"
 }

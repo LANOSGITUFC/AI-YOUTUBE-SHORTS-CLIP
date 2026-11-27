@@ -6,6 +6,9 @@ from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
+def get_utc_now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
 class SourceChannel(Base):
     __tablename__ = "source_channels"
 
@@ -18,7 +21,7 @@ class SourceChannel(Base):
     is_active = Column(Boolean, default=True)
     check_interval_minutes = Column(Integer, default=30)
     last_checked_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
     videos = relationship("SourceVideo", back_populates="channel", cascade="all, delete-orphan")
 
@@ -37,7 +40,7 @@ class SourceVideo(Base):
     audio_path = Column(String(500), nullable=True)
     transcript_path = Column(String(500), nullable=True)
     error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
     channel = relationship("SourceChannel", back_populates="videos")
     clips = relationship("ClipSegment", back_populates="video", cascade="all, delete-orphan")
@@ -70,7 +73,7 @@ class ClipSegment(Base):
     suggested_by = Column(String(50), default="ai_analyzer") # claude_code, open_code, gemini, etc.
     status = Column(String(50), default="analyzed") # analyzed, rendered, scheduled, published, discarded
     
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
     video = relationship("SourceVideo", back_populates="clips")
     scheduled_posts = relationship("ScheduledPost", back_populates="clip", cascade="all, delete-orphan")
@@ -92,7 +95,7 @@ class DestinationChannel(Base):
     affiliate_comment = Column(Text, default="🔥 Gostou do corte? Inscreva-se para mais clips diários! Link na bio para produtos gamers.")
     default_tags = Column(String(500), default="#shorts,#gaming,#viral,#clips,#humor")
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
     scheduled_posts = relationship("ScheduledPost", back_populates="destination_channel", cascade="all, delete-orphan")
 
@@ -112,7 +115,7 @@ class ScheduledPost(Base):
     youtube_video_id = Column(String(50), nullable=True)
     youtube_url = Column(String(500), nullable=True)
     error_log = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
     clip = relationship("ClipSegment", back_populates="scheduled_posts")
     destination_channel = relationship("DestinationChannel", back_populates="scheduled_posts")
@@ -131,7 +134,7 @@ class AgentBusEvent(Base):
     event_type = Column(String(100), nullable=False, index=True) # CLIP_PROPOSED, DEDUPE_QUERY, SYSTEM_COMMAND, STATUS_UPDATE
     payload = Column(Text, nullable=False) # JSON
     status = Column(String(50), default="pending") # pending, processed, acknowledged
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
 
 class SystemSetting(Base):

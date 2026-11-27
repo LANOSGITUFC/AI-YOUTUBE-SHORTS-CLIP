@@ -212,6 +212,6 @@ class AIBus:
                     "time": e.created_at.isoformat()
                 })
             with open(BUS_JSON_FILE, "w", encoding="utf-8") as f:
-                json.dump({"events": data, "updated_at": datetime.datetime.utcnow().isoformat()}, f, indent=2, ensure_ascii=False)
+                json.dump({"events": data, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2, ensure_ascii=False)
         except Exception as err:
             pass

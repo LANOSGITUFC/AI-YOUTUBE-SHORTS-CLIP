@@ -16,6 +16,7 @@ from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.database.models import ClipSegment, SourceVideo
 from app.services.subtitles import SubtitleEngine
+from app.services.facecam_detector import FacecamDetector
 
 CLIPS_DIR = "./data/clips"
 THUMBNAILS_DIR = "./data/thumbnails"
@@ -24,6 +25,7 @@ class VideoEditor:
     def __init__(self, db: Session):
         self.db = db
         self.subtitle_engine = SubtitleEngine()
+        self.facecam_detector = FacecamDetector()
         os.makedirs(CLIPS_DIR, exist_ok=True)
         os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 
@@ -61,9 +63,13 @@ class VideoEditor:
         )
         clip.subtitles_path = ass_subtitles_path
 
-        # 3. Monta o filtro FFmpeg de acordo com o modo 9:16
+        # 3. Detecta posição da facecam e monta o filtro FFmpeg de acordo com o modo 9:16
         crop_mode = clip.crop_mode or "split_screen"
-        vf_filter = self._build_ffmpeg_filter(crop_mode, ass_subtitles_path)
+        facecam_box = None
+        if crop_mode == "split_screen":
+            facecam_box = self.facecam_detector.detect_facecam_box(video.video_path)
+
+        vf_filter = self._build_ffmpeg_filter(crop_mode, ass_subtitles_path, facecam_box)
 
         duration = clip.end_time - clip.start_time
 
@@ -87,7 +93,7 @@ class VideoEditor:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if res.returncode != 0:
             # Se falhar (ex: erro no filtro ass), tenta sem filtro de legenda como fallback
-            fallback_filter = self._build_simple_fallback_filter(crop_mode)
+            fallback_filter = self._build_simple_fallback_filter(crop_mode, facecam_box)
             fb_cmd = [
                 "ffmpeg", "-y",
                 "-ss", str(clip.start_time),
@@ -133,18 +139,28 @@ class VideoEditor:
             "status": "rendered"
         }
 
-    def _build_ffmpeg_filter(self, crop_mode: str, ass_path: str) -> str:
+    def _build_ffmpeg_filter(self, crop_mode: str, ass_path: str, facecam_box: Optional[Dict[str, Any]] = None) -> str:
         # Escapar caminhos para FFmpeg filter
         escaped_ass = ass_path.replace("\\", "/").replace(":", "\\:")
 
         if crop_mode == "split_screen":
+            # Coordenadas relativas dinâmicas detectadas da Facecam
+            if facecam_box:
+                rel_w = facecam_box.get("rel_w", 0.45)
+                rel_h = facecam_box.get("rel_h", 0.45)
+                rel_x = facecam_box.get("rel_x", 0.55)
+                rel_y = facecam_box.get("rel_y", 0.0)
+                cam_crop = f"crop=iw*{rel_w}:ih*{rel_h}:iw*{rel_x}:ih*{rel_y}"
+            else:
+                cam_crop = "crop=iw*0.45:ih*0.45:iw*0.55:0"
+
             # Layout Gamer 1080x1920:
-            # Topo (1080x960): Facecam do canto superior esquerdo ou direito do streamer
+            # Topo (1080x960): Facecam do streamer detectada dinamicamente
             # Fundo (1080x960): Gameplay central
             # ass filter adicionado no final
             return (
                 f"[0:v]split=2[cam][game];"
-                f"[cam]crop=iw*0.45:ih*0.45:iw*0.55:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[cam_out];"
+                f"[cam]{cam_crop},scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[cam_out];"
                 f"[game]crop=iw*0.65:ih:iw*0.175:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[game_out];"
                 f"[cam_out][game_out]vstack=inputs=2[stacked];"
                 f"[stacked]ass='{escaped_ass}'[v]"
@@ -166,11 +182,19 @@ class VideoEditor:
                 f"[cropped]ass='{escaped_ass}'[v]"
             )
 
-    def _build_simple_fallback_filter(self, crop_mode: str) -> str:
+    def _build_simple_fallback_filter(self, crop_mode: str, facecam_box: Optional[Dict[str, Any]] = None) -> str:
         if crop_mode == "split_screen":
+            if facecam_box:
+                rel_w = facecam_box.get("rel_w", 0.45)
+                rel_h = facecam_box.get("rel_h", 0.45)
+                rel_x = facecam_box.get("rel_x", 0.55)
+                rel_y = facecam_box.get("rel_y", 0.0)
+                cam_crop = f"crop=iw*{rel_w}:ih*{rel_h}:iw*{rel_x}:ih*{rel_y}"
+            else:
+                cam_crop = "crop=iw*0.45:ih*0.45:iw*0.55:0"
             return (
                 f"[0:v]split=2[cam][game];"
-                f"[cam]crop=iw*0.45:ih*0.45:iw*0.55:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[cam_out];"
+                f"[cam]{cam_crop},scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[cam_out];"
                 f"[game]crop=iw*0.65:ih:iw*0.175:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[game_out];"
                 f"[cam_out][game_out]vstack=inputs=2[v]"
             )
