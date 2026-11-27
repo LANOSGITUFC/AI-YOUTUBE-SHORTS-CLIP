@@ -26,10 +26,8 @@ THUMBNAILS_DIR = "./data/thumbnails"
 logger = logging.getLogger("VideoEditor")
 
 class VideoEditor:
-    def __init__(self, db: Session, enable_vfx: bool = True):
+    def __init__(self, db: Session):
         self.db = db
-        self.enable_vfx = enable_vfx
-        self.effects_engine = VideoEffectsEngine()
         self.subtitle_engine = SubtitleEngine()
         self.facecam_detector = FacecamDetector()
         self.effects_engine = VideoEffectsEngine()
@@ -76,8 +74,7 @@ class VideoEditor:
         if crop_mode == "split_screen":
             facecam_box = self.facecam_detector.detect_facecam_box(video.video_path)
 
-        base_filter = self._build_ffmpeg_filter(crop_mode, ass_subtitles_path, facecam_box)
-        vf_filter = self._apply_retention_vfx(base_filter, clip.category)
+        vf_filter = self._build_ffmpeg_filter(crop_mode, ass_subtitles_path, facecam_box)
 
         duration = clip.end_time - clip.start_time
 
@@ -88,29 +85,25 @@ class VideoEditor:
             )
 
         # 4. Executa a renderização FFmpeg
-        def _main_cmd(filter_graph: str) -> list:
-            return [
-                "ffmpeg", "-y",
-                "-ss", str(clip.start_time),
-                "-i", video.video_path,
-                "-t", str(duration),
-                "-filter_complex", filter_graph,
-                "-map", "[v]",
-                "-map", "0:a?",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "22",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-af", "loudnorm=I=-14:LRA=7:tp=-1.5", # Normalização de áudio para Shorts
-                "-movflags", "+faststart",
-                clip_output_path
-            ]
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", str(clip.start_time),
+            "-i", video.video_path,
+            "-t", str(duration),
+            "-filter_complex", vf_filter,
+            "-map", "[v]",
+            "-map", "0:a?",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "22",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-af", "loudnorm=I=-14:LRA=7:tp=-1.5", # Normalização de áudio para Shorts
+            "-movflags", "+faststart",
+            clip_output_path
+        ]
 
-        res = subprocess.run(_main_cmd(vf_filter), capture_output=True, text=True, timeout=300)
-        if res.returncode != 0 and vf_filter != base_filter:
-            # Efeitos de retenção falharam (ex: FFmpeg antigo): renderiza sem eles
-            res = subprocess.run(_main_cmd(base_filter), capture_output=True, text=True, timeout=300)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if res.returncode != 0:
             logger.warning(
                 "FFmpeg render failed for clip #%s (retrying without VFX/subtitles): %s",
