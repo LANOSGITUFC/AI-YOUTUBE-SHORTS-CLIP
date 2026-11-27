@@ -1,13 +1,16 @@
 """
 24/7 BACKGROUND ORCHESTRATION PIPELINE WORKER
-Executa em loop assíncrono as 5 etapas da esteira:
-[Monitorar Canais] -> [Baixar & Transcrever] -> [Detectar Clipes c/ Deduplicação] -> [Renderizar 9:16] -> [Agendar 4/dia x 7 dias]
+Executa as etapas da esteira com telemetria em tempo real, proteção contra concorrência (Lock)
+e suporte a processamento sob demanda de vídeos específicos.
 """
 
 import time
+import datetime
 import logging
+import threading
 import traceback
-from typing import Dict, Any
+from collections import deque
+from typing import Dict, Any, Optional, List
 from app.database.session import SessionLocal
 from app.services.monitor import ChannelMonitor
 from app.services.downloader import VideoDownloader
@@ -21,142 +24,268 @@ from app.database.models import SourceVideo, ClipSegment, ScheduledPost
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("PipelineWorker")
 
+
 class PipelineWorker:
     def __init__(self):
         self.is_running = False
+        self._lock = threading.Lock()
+        self._logs: deque = deque(maxlen=100)
+        self._state: Dict[str, Any] = {
+            "busy": False,
+            "stage": "idle",
+            "message": "Aguardando próximo ciclo",
+            "progress": 0,
+            "current_video_id": None,
+            "current_video_title": None,
+            "current_clip_id": None,
+            "last_run_at": None,
+            "last_error": None,
+        }
+
+    def _log(self, level: str, message: str, stage: Optional[str] = None, progress: Optional[int] = None):
+        now_str = datetime.datetime.now().strftime("%H:%M:%S")
+        entry = {"time": now_str, "level": level, "message": message}
+        self._logs.appendleft(entry)
+        if stage is not None:
+            self._state["stage"] = stage
+        if progress is not None:
+            self._state["progress"] = progress
+        self._state["message"] = message
+        if level == "error":
+            self._state["last_error"] = message
+            logger.error(message)
+        else:
+            logger.info(message)
+
+    def get_live_state(self) -> Dict[str, Any]:
+        return {
+            **self._state,
+            "logs": list(self._logs)[:50],
+        }
+
+    def process_single_video(self, video_id: str, auto_render_first: bool = True) -> Dict[str, Any]:
+        """Processa um vídeo específico sob demanda (download -> transcrição -> 3-7 clipes -> render opcional)."""
+        if not self._lock.acquire(blocking=False):
+            return {"busy": True, "message": "A esteira já está processando outra tarefa."}
+
+        try:
+            self._state["busy"] = True
+            self._state["last_error"] = None
+            self._state["current_video_id"] = video_id
+            self._state["current_clip_id"] = None
+
+            with SessionLocal() as db:
+                video = db.query(SourceVideo).filter(SourceVideo.id == video_id).first()
+                if not video:
+                    raise ValueError(f"Vídeo {video_id} não encontrado.")
+                self._state["current_video_title"] = video.title
+
+                downloader = VideoDownloader(db)
+                transcriber = WhisperTranscriber(db)
+                analyzer = HighlightAnalyzer(db)
+                editor = VideoEditor(db)
+                scheduler = PostScheduler(db)
+
+                self._log("info", f"Baixando vídeo: {video.title[:65]}", stage="downloading", progress=20)
+                downloader.download_video(video.id)
+
+                self._log("info", f"Extraindo legendas/transcrição: {video.id}", stage="transcribing", progress=45)
+                transcriber.transcribe_video(video.id)
+
+                self._log("info", f"Analisando momentos virais (3 a 7 cortes): {video.id}", stage="analyzing", progress=65)
+                clips = analyzer.analyze_video(video.id, max_clips=7, min_clips=3)
+                self._log("success", f"{len(clips)} cortes inéditos identificados em {video.id}", stage="analyzing", progress=75)
+
+                rendered_ids: List[int] = []
+                if auto_render_first and clips:
+                    top_clip = max(clips, key=lambda c: c.virality_score or 0)
+                    self._state["current_clip_id"] = top_clip.id
+                    self._log("info", f"Renderizando 9:16 do corte #{top_clip.id}: {top_clip.title[:50]}", stage="rendering", progress=88)
+                    editor.render_clip(top_clip.id)
+                    rendered_ids.append(top_clip.id)
+                    scheduler.auto_schedule_all_rendered()
+
+                self._log("success", f"Processamento concluído para {video.title[:55]}", stage="idle", progress=100)
+                self._state["last_run_at"] = datetime.datetime.now().isoformat()
+                return {
+                    "success": True,
+                    "video_id": video.id,
+                    "clips_generated": len(clips),
+                    "rendered_clip_ids": rendered_ids,
+                }
+        except Exception as e:
+            self._log("error", f"Erro ao processar vídeo {video_id}: {e}", stage="error", progress=0)
+            return {"success": False, "error": str(e)}
+        finally:
+            self._state["busy"] = False
+            self._state["current_video_id"] = None
+            self._state["current_video_title"] = None
+            self._state["current_clip_id"] = None
+            self._lock.release()
 
     def run_one_cycle(self) -> Dict[str, Any]:
-        """
-        Executa um ciclo completo de ponta a ponta.
-        """
+        """Executa um ciclo completo de ponta a ponta sem sobrepor execuções simultâneas."""
+        if not self._lock.acquire(blocking=False):
+            return {"busy": True, "message": "Ciclo já em andamento."}
+
         results = {
             "monitor": None,
             "downloads": 0,
             "transcriptions": 0,
             "clips_generated": 0,
             "clips_rendered": 0,
-            "posts_scheduled": 0
+            "posts_scheduled": 0,
+            "posts_reallocated": 0,
         }
 
-        with SessionLocal() as db:
-            monitor = ChannelMonitor(db)
-            downloader = VideoDownloader(db)
-            transcriber = WhisperTranscriber(db)
-            analyzer = HighlightAnalyzer(db)
-            editor = VideoEditor(db)
-            scheduler = PostScheduler(db)
-            uploader = YouTubeUploader(db)
+        try:
+            self._state["busy"] = True
+            self._state["last_error"] = None
 
-            # 1. Monitorar canais 24/7
-            try:
-                mon_res = monitor.check_all_active_channels()
-                results["monitor"] = mon_res
-            except Exception as e:
-                logger.error(f"Erro no monitor: {e}")
+            with SessionLocal() as db:
+                monitor = ChannelMonitor(db)
+                downloader = VideoDownloader(db)
+                transcriber = WhisperTranscriber(db)
+                analyzer = HighlightAnalyzer(db)
+                editor = VideoEditor(db)
+                scheduler = PostScheduler(db)
+                uploader = YouTubeUploader(db)
 
-            # 2. Processar vídeos descobertos (alterna entre streamers para misturar cortes)
-            discovered_videos = (
-                db.query(SourceVideo)
-                .filter(SourceVideo.status == "discovered")
-                .order_by(SourceVideo.published_at.desc())
-                .all()
-            )
-            pending_video = None
-            if discovered_videos:
-                # Conta quantos vídeos já foram processados por streamer para dar vez aos outros
-                processed_counts = {}
-                for v in discovered_videos:
-                    if v.channel_id not in processed_counts:
-                        processed_counts[v.channel_id] = (
-                            db.query(SourceVideo)
-                            .filter(SourceVideo.channel_id == v.channel_id)
-                            .filter(SourceVideo.status.in_(["downloaded", "transcribing", "transcribed", "processed"]))
-                            .count()
-                        )
-                pending_video = min(discovered_videos, key=lambda v: processed_counts.get(v.channel_id, 0))
-
-            if pending_video:
+                # 1. Monitorar canais 24/7
                 try:
-                    logger.info(f"Baixando vídeo ({pending_video.channel_id}): {pending_video.title}")
-                    downloader.download_video(pending_video.id)
-                    results["downloads"] += 1
-
-                    logger.info(f"Transcrevendo vídeo: {pending_video.id}")
-                    transcriber.transcribe_video(pending_video.id)
-                    results["transcriptions"] += 1
-
-                    logger.info(f"Detectando de 3 a 7 momentos virais com deduplicação: {pending_video.id}")
-                    clips = analyzer.analyze_video(pending_video.id, max_clips=7, min_clips=3)
-                    results["clips_generated"] += len(clips)
+                    self._log("info", "Varrendo feeds RSS dos canais ativos...", stage="monitoring", progress=10)
+                    mon_res = monitor.check_all_active_channels()
+                    results["monitor"] = mon_res
+                    if mon_res.get("new_videos_found", 0) > 0:
+                        self._log("success", f"{mon_res['new_videos_found']} novos vídeos descobertos!", stage="monitoring", progress=18)
                 except Exception as e:
-                    logger.error(f"Erro no pipeline do vídeo {pending_video.id}: {traceback.format_exc()}")
+                    self._log("error", f"Erro no monitor RSS: {e}")
 
-            # 3. Renderizar clipes analisados pendentes (alternando entre streamers)
-            analyzed_clips = (
-                db.query(ClipSegment)
-                .filter(ClipSegment.status == "analyzed")
-                .order_by(ClipSegment.virality_score.desc())
-                .all()
-            )
-            pending_clip = None
-            if analyzed_clips:
-                rendered_counts = {}
-                for c in analyzed_clips:
-                    ch_id = c.video.channel_id if c.video else str(c.video_id)
-                    if ch_id not in rendered_counts:
-                        rendered_counts[ch_id] = (
-                            db.query(ClipSegment)
-                            .join(SourceVideo, ClipSegment.video_id == SourceVideo.id)
-                            .filter(SourceVideo.channel_id == ch_id)
-                            .filter(ClipSegment.status.in_(["rendered", "scheduled", "published"]))
-                            .count()
-                        )
-                pending_clip = min(
-                    analyzed_clips,
-                    key=lambda c: (
-                        rendered_counts.get(c.video.channel_id if c.video else str(c.video_id), 0),
-                        -(c.virality_score or 0)
-                    )
+                # 2. Processar próximo vídeo descoberto (alternando entre streamers)
+                discovered_videos = (
+                    db.query(SourceVideo)
+                    .filter(SourceVideo.status == "discovered")
+                    .order_by(SourceVideo.published_at.desc())
+                    .all()
                 )
+                pending_video = None
+                if discovered_videos:
+                    processed_counts = {}
+                    for v in discovered_videos:
+                        if v.channel_id not in processed_counts:
+                            processed_counts[v.channel_id] = (
+                                db.query(SourceVideo)
+                                .filter(SourceVideo.channel_id == v.channel_id)
+                                .filter(SourceVideo.status.in_(["downloaded", "transcribing", "transcribed", "processed"]))
+                                .count()
+                            )
+                    pending_video = min(discovered_videos, key=lambda v: processed_counts.get(v.channel_id, 0))
 
-            if pending_clip:
+                if pending_video:
+                    self._state["current_video_id"] = pending_video.id
+                    self._state["current_video_title"] = pending_video.title
+                    try:
+                        self._log("info", f"Baixando vídeo: {pending_video.title[:60]}", stage="downloading", progress=30)
+                        downloader.download_video(pending_video.id)
+                        results["downloads"] += 1
+
+                        self._log("info", f"Transcrevendo vídeo {pending_video.id}...", stage="transcribing", progress=50)
+                        transcriber.transcribe_video(pending_video.id)
+                        results["transcriptions"] += 1
+
+                        self._log("info", f"Detectando 3 a 7 momentos virais em {pending_video.id}...", stage="analyzing", progress=68)
+                        clips = analyzer.analyze_video(pending_video.id, max_clips=7, min_clips=3)
+                        results["clips_generated"] += len(clips)
+                        self._log("success", f"{len(clips)} cortes criados para {pending_video.title[:45]}", stage="analyzing", progress=74)
+                    except Exception as e:
+                        self._log("error", f"Erro no vídeo {pending_video.id}: {e}")
+                        logger.debug(traceback.format_exc())
+
+                # 3. Renderizar próximo clipe analisado (com arquivo fonte disponível em disco)
+                analyzed_clips = (
+                    db.query(ClipSegment)
+                    .filter(ClipSegment.status == "analyzed")
+                    .order_by(ClipSegment.virality_score.desc())
+                    .all()
+                )
+                renderable_clips = [
+                    c for c in analyzed_clips
+                    if c.video and c.video.video_path
+                ]
+                pending_clip = None
+                if renderable_clips:
+                    rendered_counts = {}
+                    for c in renderable_clips:
+                        ch_id = c.video.channel_id if c.video else str(c.video_id)
+                        if ch_id not in rendered_counts:
+                            rendered_counts[ch_id] = (
+                                db.query(ClipSegment)
+                                .join(SourceVideo, ClipSegment.video_id == SourceVideo.id)
+                                .filter(SourceVideo.channel_id == ch_id)
+                                .filter(ClipSegment.status.in_(["rendered", "scheduled", "published"]))
+                                .count()
+                            )
+                    pending_clip = min(
+                        renderable_clips,
+                        key=lambda c: (
+                            rendered_counts.get(c.video.channel_id if c.video else str(c.video_id), 0),
+                            -(c.virality_score or 0),
+                        ),
+                    )
+
+                if pending_clip:
+                    self._state["current_clip_id"] = pending_clip.id
+                    try:
+                        self._log("info", f"Renderizando 9:16 clipe #{pending_clip.id}: {pending_clip.title[:50]}", stage="rendering", progress=84)
+                        editor.render_clip(pending_clip.id)
+                        results["clips_rendered"] += 1
+                        self._log("success", f"Clipe #{pending_clip.id} renderizado em 1080x1920!", stage="rendering", progress=92)
+                    except Exception as e:
+                        self._log("error", f"Erro ao renderizar clipe #{pending_clip.id}: {e}")
+                        logger.debug(traceback.format_exc())
+
+                # 4. Realocar posts vencidos e agendar clipes renderizados
                 try:
-                    logger.info(f"Renderizando clipe 9:16 #{pending_clip.id}: {pending_clip.title}")
-                    editor.render_clip(pending_clip.id)
-                    results["clips_rendered"] += 1
+                    reallocated_count = scheduler.reallocate_overdue_posts()
+                    results["posts_reallocated"] = reallocated_count
+                    sched_count = scheduler.auto_schedule_all_rendered()
+                    results["posts_scheduled"] += sched_count
+                    if sched_count:
+                        self._log("success", f"{sched_count} clipes alocados na grade semanal", stage="scheduling", progress=96)
                 except Exception as e:
-                    logger.error(f"Erro ao renderizar clipe #{pending_clip.id}: {traceback.format_exc()}")
+                    self._log("error", f"Erro no agendador: {e}")
 
-            # 4. Realocar posts vencidos não publicados e agendar clipes renderizados
-            try:
-                reallocated_count = scheduler.reallocate_overdue_posts()
-                results["posts_reallocated"] = reallocated_count
-                sched_count = scheduler.auto_schedule_all_rendered()
-                results["posts_scheduled"] += sched_count
-            except Exception as e:
-                logger.error(f"Erro no agendador: {e}")
+                # 5. Processar próximo upload pendente (somente se MP4 existir no disco)
+                pending_posts = (
+                    db.query(ScheduledPost)
+                    .filter(ScheduledPost.status == "pending")
+                    .order_by(ScheduledPost.scheduled_for.asc())
+                    .all()
+                )
+                for post in pending_posts:
+                    if post.clip and post.clip.clip_path:
+                        try:
+                            uploader.upload_scheduled_post(post.id)
+                        except Exception as e:
+                            self._log("error", f"Erro no upload do post #{post.id}: {e}")
+                        break
 
-            # 5. Processar uploads agendados pendentes (do mais próximo ao mais distante)
-            pending_post = (
-                db.query(ScheduledPost)
-                .filter(ScheduledPost.status == "pending")
-                .order_by(ScheduledPost.scheduled_for.asc())
-                .first()
-            )
-            if pending_post:
-                try:
-                    uploader.upload_scheduled_post(pending_post.id)
-                except Exception as e:
-                    logger.error(f"Erro no upload do post #{pending_post.id}: {e}")
+            self._state["last_run_at"] = datetime.datetime.now().isoformat()
+            self._log("info", "Ciclo concluído. Aguardando próxima execução.", stage="idle", progress=100)
+            return results
+        finally:
+            self._state["busy"] = False
+            self._state["current_video_id"] = None
+            self._state["current_video_title"] = None
+            self._state["current_clip_id"] = None
+            self._lock.release()
 
-        return results
-
-    def start_loop(self, interval_seconds: int = 120):
+    def start_loop(self, interval_seconds: int = 180):
         self.is_running = True
-        logger.info("Pipeline Worker 24/7 iniciado!")
+        self._log("info", "Pipeline Worker 24/7 inicializado.", stage="idle", progress=0)
         while self.is_running:
             try:
                 self.run_one_cycle()
             except Exception as e:
-                logger.error(f"Erro no ciclo do worker: {e}")
+                self._log("error", f"Erro no ciclo do worker: {e}", stage="error", progress=0)
             time.sleep(interval_seconds)

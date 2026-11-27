@@ -1,776 +1,682 @@
 <!DOCTYPE html>
-<html lang="pt-BR" class="dark">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ClipperStudio Pro 24/7 — AI YouTube Shorts & Streamer Automation</title>
+  <title>Clipper Studio — Produção e Agendamento de Shorts</title>
+  <meta name="description" content="Estúdio local de automação 24/7 para cortes verticais 9:16, legendas dinâmicas, deduplicação e agendamento multicanal no YouTube Shorts.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
-            mono: ['"JetBrains Mono"', 'monospace'],
-          },
-          colors: {
-            brand: {
-              50: '#fff1f2',
-              500: '#f43f5e',
-              600: '#e11d48',
-              700: '#be123c',
-            },
-            studio: {
-              950: '#07090e',
-              900: '#0c1017',
-              850: '#111722',
-              800: '#161e2e',
-              700: '#232f45',
-              600: '#334155',
-            }
-          }
-        }
-      }
-    }
-  </script>
-  <style>
-    /* Custom scrollbars */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #0c1017; }
-    ::-webkit-scrollbar-thumb { background: #232f45; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #334155; }
-    
-    .glow-rose {
-      box-shadow: 0 0 25px -5px rgba(244, 63, 94, 0.35);
-    }
-    .glow-cyan {
-      box-shadow: 0 0 25px -5px rgba(6, 182, 212, 0.35);
-    }
-    .phone-mockup {
-      aspect-ratio: 9/16;
-      border: 6px solid #232f45;
-      border-radius: 28px;
-      overflow: hidden;
-      position: relative;
-    }
-  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body class="bg-studio-950 text-slate-100 min-h-screen font-sans flex flex-col antialiased selection:bg-brand-500 selection:text-white">
-
-  <!-- TOPBAR -->
-  <header class="border-b border-studio-800 bg-studio-900/90 backdrop-blur-md sticky top-0 z-50 px-6 py-3.5 flex items-center justify-between">
-    <div class="flex items-center space-x-4">
-      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 via-rose-600 to-amber-500 flex items-center justify-center shadow-lg shadow-brand-500/20">
-        <i class="fa-solid fa-bolt-lightning text-white text-lg"></i>
+<body>
+  <div class="app-shell">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="brand-bar">
+        <div class="brand-mark">
+          <span class="rec-dot"></span>
+          <span>Clipper Studio</span>
+        </div>
+        <span class="brand-ver">v2.0</span>
       </div>
-      <div>
-        <div class="flex items-center gap-2.5">
-          <h1 class="text-base font-extrabold tracking-tight text-white">CLIPPER STUDIO PRO</h1>
-          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 uppercase tracking-wider">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span> 24/7 Autônomo
+
+      <nav class="nav-section" aria-label="Navegação principal">
+        <div class="nav-group-label">Produção</div>
+        <button class="nav-item active" data-view="clips" onclick="switchView('clips')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3V9z"/></svg>
+            Clipes 9:16
           </span>
-          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30">
-            Deduplicação Ativa
+          <span class="nav-count" id="navCountClips">0</span>
+        </button>
+
+        <button class="nav-item" data-view="queue" onclick="switchView('queue')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+            Fila & Esteira
           </span>
-        </div>
-        <p class="text-xs text-slate-400">9 Streamers Monitorados • 4 Vídeos/Dia x 7 Dias • Antigravity + Claude Code Dual Engine</p>
-      </div>
-    </div>
+          <span class="nav-count" id="navCountVideos">0</span>
+        </button>
 
-    <div class="flex items-center space-x-3">
-      <div class="hidden md:flex items-center space-x-2 text-xs font-mono bg-studio-850 px-3 py-1.5 rounded-lg border border-studio-700/60 text-slate-400">
-        <span class="text-slate-500">MCP:</span> <span class="text-cyan-400 font-bold">READY</span>
-        <span class="text-slate-600">|</span>
-        <span class="text-slate-500">CLAUDE:</span> <span class="text-amber-400 font-bold">PAIRED</span>
-      </div>
-      <button onclick="triggerCheckChannels()" class="px-4 py-2 rounded-lg bg-studio-800 hover:bg-studio-700 text-xs font-semibold border border-studio-700 text-slate-200 transition flex items-center gap-2">
-        <i class="fa-solid fa-arrows-rotate text-brand-500"></i> Varrer 9 Canais
-      </button>
-      <button onclick="triggerPipelineCycle()" class="px-4 py-2 rounded-lg bg-gradient-to-r from-brand-600 to-rose-600 hover:from-brand-500 hover:to-rose-500 text-xs font-bold text-white shadow-lg glow-rose transition flex items-center gap-2">
-        <i class="fa-solid fa-play"></i> Disparar Esteira
-      </button>
-    </div>
-  </header>
-
-  <!-- WORKSPACE BODY -->
-  <main class="flex-1 p-6 max-w-[1500px] mx-auto w-full space-y-6">
-
-    <!-- KPI DASHBOARD -->
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
-        <div class="flex justify-between items-center text-slate-400 mb-1">
-          <span class="text-xs font-medium uppercase tracking-wider">Canais 24/7</span>
-          <i class="fa-brands fa-youtube text-brand-500"></i>
-        </div>
-        <div class="text-2xl font-extrabold text-white" id="kpiChannels">9</div>
-        <div class="text-[11px] text-emerald-400 mt-1 font-medium flex items-center gap-1">
-          <i class="fa-solid fa-circle-check text-[9px]"></i> Feeds RSS Ativos
-        </div>
-      </div>
-
-      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
-        <div class="flex justify-between items-center text-slate-400 mb-1">
-          <span class="text-xs font-medium uppercase tracking-wider">Vídeos Indexados</span>
-          <i class="fa-solid fa-layer-group text-cyan-400"></i>
-        </div>
-        <div class="text-2xl font-extrabold text-white" id="kpiVideos">135</div>
-        <div class="text-[11px] text-slate-400 mt-1">Alanzoka, Paulinho, Lipao...</div>
-      </div>
-
-      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
-        <div class="flex justify-between items-center text-slate-400 mb-1">
-          <span class="text-xs font-medium uppercase tracking-wider">Cortes Salvos</span>
-          <i class="fa-solid fa-scissors text-purple-400"></i>
-        </div>
-        <div class="text-2xl font-extrabold text-white" id="kpiClips">0</div>
-        <div class="text-[11px] text-purple-400 mt-1 font-medium">Anti-Sobreposição Ativa</div>
-      </div>
-
-      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
-        <div class="flex justify-between items-center text-slate-400 mb-1">
-          <span class="text-xs font-medium uppercase tracking-wider">Renderizados 9:16</span>
-          <i class="fa-solid fa-film text-amber-400"></i>
-        </div>
-        <div class="text-2xl font-extrabold text-white" id="kpiRendered">0</div>
-        <div class="text-[11px] text-amber-400 mt-1">Gamer Split + Legenda ASS</div>
-      </div>
-
-      <div class="bg-studio-900 border border-studio-800 p-4 rounded-2xl hover:border-studio-700 transition">
-        <div class="flex justify-between items-center text-slate-400 mb-1">
-          <span class="text-xs font-medium uppercase tracking-wider">Slots Agendados</span>
-          <i class="fa-solid fa-calendar-check text-rose-400"></i>
-        </div>
-        <div class="text-2xl font-extrabold text-white" id="kpiScheduled">0</div>
-        <div class="text-[11px] text-rose-400 mt-1 font-medium">Meta: 4/dia (28 semanais)</div>
-      </div>
-    </div>
-
-    <!-- STUDIO TABS -->
-    <div class="border-b border-studio-800 flex space-x-8 text-sm">
-      <button onclick="switchTab('channels')" id="tabBtnChannels" class="pb-3 font-bold border-b-2 border-brand-500 text-white flex items-center gap-2.5 transition">
-        <i class="fa-brands fa-youtube text-brand-500"></i> 9 Canais Monitorados
-      </button>
-      <button onclick="switchTab('calendar')" id="tabBtnCalendar" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
-        <i class="fa-regular fa-calendar-days text-amber-400"></i> Grade de 4 Vídeos/Dia (7 Dias)
-      </button>
-      <button onclick="switchTab('clips')" id="tabBtnClips" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
-        <i class="fa-solid fa-shield-halved text-purple-400"></i> Deduplicação & Clipes
-      </button>
-      <button onclick="switchTab('timeline')" id="tabBtnTimeline" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
-        <i class="fa-solid fa-chart-gantt text-emerald-400"></i> Inspetor de Linha do Tempo
-      </button>
-      <button onclick="switchTab('aibus')" id="tabBtnAibus" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
-        <i class="fa-solid fa-terminal text-cyan-400"></i> Console Claude Code & Multi-IA
-      </button>
-      <button onclick="switchTab('destinations')" id="tabBtnDestinations" class="pb-3 font-bold border-b-2 border-transparent text-slate-400 hover:text-white flex items-center gap-2.5 transition">
-        <i class="fa-solid fa-cloud-arrow-up text-rose-500"></i> Contas & Monetização
-      </button>
-    </div>
-
-    <!-- TAB 1: 9 CANAIS MONITORADOS -->
-    <section id="tabContentChannels" class="space-y-4">
-      <div class="flex justify-between items-center">
-        <div>
-          <h2 class="text-base font-bold text-white">Canais de Streamers Sob Vigilância 24 Horas</h2>
-          <p class="text-xs text-slate-400">Detecção instantânea de novos vídeos e lives sem consumo de cota da API do YouTube</p>
-        </div>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="channelsList">
-        <!-- Preenchido via JS -->
-      </div>
-    </section>
-
-    <!-- TAB 2: CALENDÁRIO 4 VÍDEOS/DIA X 7 DIAS -->
-    <section id="tabContentCalendar" class="space-y-4 hidden">
-      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-4 border-b border-studio-800">
-          <div>
-            <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <i class="fa-solid fa-calendar-week text-amber-400"></i>
-              Matriz de Agendamento Semanal (28 Slots de Pico)
-            </h2>
-            <p class="text-xs text-slate-400 mt-1">
-              Publicações automáticas em 4 horários de maior engajamento gamer: <strong>11:30</strong> (Almoço), <strong>15:00</strong> (Tarde), <strong>18:30</strong> (Volta do Trabalho/Escola) e <strong>21:00</strong> (Prime Time).
-            </p>
-          </div>
-          <div class="flex flex-wrap items-center gap-2.5">
-            <select id="calendarChannelSelect" onchange="loadCalendar()" class="bg-studio-950 border border-studio-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-amber-500">
-              <option value="">Canal Principal</option>
-            </select>
-            <button onclick="autoFillSchedule()" class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-bold text-slate-950 transition flex items-center gap-2 shadow-lg shadow-amber-500/20">
-              <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Preencher Grade Semanal
-            </button>
-          </div>
-        </div>
-        <div class="overflow-x-auto">
-          <div id="calendarGrid" class="grid grid-cols-1 md:grid-cols-7 gap-3 min-w-[900px]">
-            <!-- Renderizado dinamicamente -->
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 3: CLIPES & MEMÓRIA DE DEDUPLICAÇÃO -->
-    <section id="tabContentClips" class="space-y-4 hidden">
-      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6">
-        <div class="flex justify-between items-center mb-4">
-          <div>
-            <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <i class="fa-solid fa-database text-purple-400"></i>
-              Registro de Cortes & Proteção Anti-Duplicidade
-            </h2>
-            <p class="text-xs text-slate-400">
-              O banco de dados memoriza cada segundo já usado. Nenhum trecho é reutilizado ou postado em duplicidade.
-            </p>
-          </div>
-        </div>
-        <div id="clipsGrid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <!-- Preenchido via JS -->
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 4: INSPETOR VISUAL DE LINHA DO TEMPO -->
-    <section id="tabContentTimeline" class="space-y-4 hidden">
-      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6 space-y-4">
-        <div>
-          <h2 class="text-base font-bold text-white flex items-center gap-2">
-            <i class="fa-solid fa-chart-gantt text-emerald-400"></i>
-            Inspetor de Linha do Tempo (Trechos Usados vs. Trechos Virgens)
-          </h2>
-          <p class="text-xs text-slate-400">
-            Visualize onde estão os cortes existentes e onde a IA pode extrair novos Shorts sem sobreposição.
-          </p>
-        </div>
-        <div class="flex items-center gap-3">
-          <select id="videoSelectTimeline" onchange="loadVideoTimeline()" class="bg-studio-850 border border-studio-700 text-xs font-mono rounded-lg px-3 py-2 text-slate-200 w-full max-w-md">
-            <!-- Populado via JS -->
-          </select>
-          <button onclick="loadVideoTimeline()" class="px-3 py-2 rounded-lg bg-studio-800 hover:bg-studio-700 text-xs font-semibold text-slate-200 border border-studio-700">
-            Atualizar Gráfico
-          </button>
-        </div>
-        <div id="timelineContainer" class="p-4 bg-studio-950 border border-studio-800 rounded-xl space-y-4">
-          <div class="flex items-center justify-between text-xs text-slate-400 font-mono">
-            <span>00:00 (Início)</span>
-            <span id="timelineDuration">30:00 (Fim)</span>
-          </div>
-          <!-- Barra gráfica interativa -->
-          <div id="timelineBar" class="h-8 bg-emerald-500/20 border border-emerald-500/40 rounded-lg relative overflow-hidden flex items-center">
-            <!-- Blocos de corte renderizados aqui -->
-          </div>
-          <div class="flex gap-4 text-xs">
-            <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-3 rounded bg-emerald-500/30 border border-emerald-500"></span> Trecho Livre (Inédito)</span>
-            <span class="flex items-center gap-1.5 text-purple-400"><span class="w-3 h-3 rounded bg-purple-500 border border-purple-400"></span> Trecho Já Usado (Bloqueado)</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 5: CONSOLE CLAUDE CODE & MULTI-IA -->
-    <section id="tabContentAibus" class="space-y-4 hidden">
-      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6 space-y-4">
-        <div class="flex justify-between items-center">
-          <div>
-            <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <i class="fa-solid fa-code-compare text-cyan-400"></i>
-              Console de Orquestração Antigravity ⇄ Claude Code
-            </h2>
-            <p class="text-xs text-slate-400">Eventos em tempo real, propostas de cortes e sincronização Git</p>
-          </div>
-          <span class="text-xs px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-mono">
-            /home/ldks/Documents/work-claude/
+        <button class="nav-item" data-view="calendar" onclick="switchView('calendar')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+            Agenda Semanal
           </span>
-        </div>
+          <span class="nav-count" id="navCountScheduled">0</span>
+        </button>
 
-        <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 font-mono text-xs max-h-96 overflow-y-auto space-y-2.5" id="aiBusLogs">
-          <!-- Logs renderizados via JS -->
+        <button class="nav-item" data-view="timeline" onclick="switchView('timeline')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M7 6v12M17 6v12"/></svg>
+            Linha do Tempo
+          </span>
+        </button>
+
+        <div class="nav-group-label">Estúdio & Fontes</div>
+        <button class="nav-item" data-view="presets" onclick="switchView('presets')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg>
+            Estilo & Legendas
+          </span>
+        </button>
+
+        <button class="nav-item" data-view="channels" onclick="switchView('channels')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+            Canais Monitorados
+          </span>
+          <span class="nav-count" id="navCountChannels">0</span>
+        </button>
+
+        <button class="nav-item" data-view="destinations" onclick="switchView('destinations')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Contas YouTube
+          </span>
+          <span class="nav-count" id="navCountDest">0</span>
+        </button>
+
+        <div class="nav-group-label">Sistema</div>
+        <button class="nav-item" data-view="settings" onclick="switchView('settings')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            IA & Configurações
+          </span>
+        </button>
+      </nav>
+
+      <div class="worker-box">
+        <div class="worker-row">
+          <div class="worker-label">
+            <span class="status-dot" id="workerDot"></span>
+            <span id="workerStageLabel">Esteira ociosa</span>
+          </div>
+          <span class="nav-count" id="workerProgressPct">0%</span>
         </div>
+        <div class="worker-msg" id="workerMsg">Aguardando próximo ciclo</div>
+        <div class="progress-track">
+          <div class="progress-fill" id="workerProgressBar"></div>
+        </div>
+        <button class="btn btn-primary btn-sm btn-block" id="btnRunCycle" onclick="triggerPipelineCycle()">
+          Executar ciclo agora
+        </button>
       </div>
-    </section>
+    </aside>
 
-    <!-- TAB 6: CONTAS & MONETIZAÇÃO (YOUTUBE OAUTH2) -->
-    <section id="tabContentDestinations" class="space-y-4 hidden">
-      <div class="bg-studio-900 border border-studio-800 rounded-2xl p-6 space-y-5">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-studio-800">
-          <div>
-            <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <i class="fa-brands fa-youtube text-brand-500"></i>
-              Contas do YouTube Conectadas para Monetização
-            </h2>
-            <p class="text-xs text-slate-400 mt-1">
-              Conecte múltiplos canais do YouTube usando OAuth 2.0 oficial. Cada canal tem seu Refresh Token próprio para envio de 4 vídeos/dia.
-            </p>
-          </div>
-          <a href="/api/auth/youtube/login" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-xs font-bold text-white transition flex items-center gap-2 shadow-lg shadow-red-600/30">
-            <i class="fa-solid fa-plus"></i> Conectar Nova Conta (OAuth Google)
-          </a>
+    <!-- MAIN WORKSPACE -->
+    <div class="main-col">
+      <header class="topbar">
+        <div class="topbar-title-wrap">
+          <h1 class="topbar-title" id="topbarTitle">Clipes 9:16</h1>
         </div>
 
-        <div id="weightsSummaryBar" class="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-studio-950 border border-studio-800 rounded-xl text-xs hidden">
-          <div class="flex items-center gap-2">
-            <span class="text-slate-400">Soma da Distribuição:</span>
-            <span id="weightsTotalBadge" class="px-2.5 py-1 rounded-lg font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">100% / 100%</span>
-            <span id="weightsHint" class="text-slate-400 hidden">A soma deve fechar exatamente em 100% (canais com 0% ficam pausados).</span>
-          </div>
-          <button id="saveWeightsBtn" onclick="saveAllWeights()" class="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold transition">
-            Salvar Distribuição (%)
-          </button>
+        <form class="quick-import-form" onsubmit="importVideoUrl(event)">
+          <input
+            id="quickImportUrl"
+            type="text"
+            class="quick-import-input"
+            placeholder="Colar URL do YouTube para baixar e cortar agora..."
+            aria-label="URL do vídeo do YouTube"
+          >
+          <button type="submit" class="btn btn-sm" id="btnQuickImport">Cortar URL</button>
+        </form>
+
+        <div class="topbar-actions">
+          <button class="btn btn-sm" onclick="triggerCheckChannels()">Varrer canais</button>
         </div>
+      </header>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="destinationsList">
-          <!-- Renderizado via JS -->
+      <!-- COMPACT TELEMETRY STRIP -->
+      <section class="telemetry-strip" aria-label="Resumo do sistema">
+        <div class="metric-cell">
+          <span class="metric-label">Canais ativos</span>
+          <span class="metric-value" id="kpiChannels">0</span>
+          <span class="metric-sub">Feeds RSS 24/7</span>
         </div>
-
-        <div class="p-4 bg-studio-950 border border-studio-800 rounded-xl text-xs space-y-2 text-slate-400">
-          <span class="font-bold text-white flex items-center gap-1.5"><i class="fa-solid fa-circle-info text-cyan-400"></i> Como funciona a cota e os múltiplos canais:</span>
-          <p>• O YouTube concede <strong>10.000 unidades de cota gratuitas por dia</strong> no Google Cloud. Cada upload de vídeo consome 1.600 unidades (permitindo até 6 uploads diários por projeto).</p>
-          <p>• Com a meta de <strong>4 vídeos por dia por canal</strong>, 1 projeto do Google Cloud atende perfeitamente 1 a 2 canais com folga.</p>
-          <p>• Para monetizar mais canais (ex: 5 a 10 canais), basta criar projetos adicionais gratuitos no Google Cloud Console e cadastrar os tokens correspondentes no projeto.</p>
+        <div class="metric-cell">
+          <span class="metric-label">Vídeos rastreados</span>
+          <span class="metric-value" id="kpiVideos">0</span>
+          <span class="metric-sub">Fila de origem</span>
         </div>
-      </div>
-    </section>
+        <div class="metric-cell">
+          <span class="metric-label">Cortes mapeados</span>
+          <span class="metric-value" id="kpiClips">0</span>
+          <span class="metric-sub">Deduplicação estrita</span>
+        </div>
+        <div class="metric-cell">
+          <span class="metric-label">MP4s prontos (9:16)</span>
+          <span class="metric-value" id="kpiRendered">0</span>
+          <span class="metric-sub">Validados em disco</span>
+        </div>
+        <div class="metric-cell">
+          <span class="metric-label">Slots agendados</span>
+          <span class="metric-value" id="kpiScheduled">0</span>
+          <span class="metric-sub">Grade 4/dia × 7 dias</span>
+        </div>
+      </section>
 
-  </main>
-
-  <script>
-    let allVideos = [];
-
-    async function fetchStats() {
-      try {
-        const res = await fetch('/api/status');
-        const data = await res.json();
-        document.getElementById('kpiChannels').innerText = data.monitored_channels;
-        document.getElementById('kpiVideos').innerText = data.videos_tracked;
-        document.getElementById('kpiClips').innerText = data.clips_total;
-        document.getElementById('kpiRendered').innerText = data.clips_rendered;
-        document.getElementById('kpiScheduled').innerText = data.scheduled_posts;
-      } catch (e) { console.error(e); }
-    }
-
-    async function loadChannels() {
-      try {
-        const res = await fetch('/api/channels');
-        const channels = await res.json();
-        const container = document.getElementById('channelsList');
-        container.innerHTML = channels.map(c => `
-          <div class="bg-studio-900 border border-studio-800 rounded-2xl p-4 flex flex-col justify-between hover:border-studio-700 transition">
-            <div class="flex items-start justify-between">
-              <div>
-                <h3 class="font-bold text-sm text-white">${c.name}</h3>
-                <span class="text-xs text-brand-500 font-mono font-medium">${c.handle}</span>
-              </div>
-              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" title="Ativo 24/7"></span>
-            </div>
-            <div class="mt-4 pt-3 border-t border-studio-800 flex items-center justify-between text-xs text-slate-400">
-              <span class="font-mono text-[11px] text-slate-300 font-semibold">${c.video_count} vídeos rastreados</span>
-              <a href="${c.url}" target="_blank" class="text-slate-400 hover:text-white transition flex items-center gap-1">
-                <i class="fa-brands fa-youtube text-brand-500"></i> YouTube
-              </a>
-            </div>
-          </div>
-        `).join('');
-      } catch (e) { console.error(e); }
-    }
-
-    async function loadCalendar() {
-      try {
-        const sel = document.getElementById('calendarChannelSelect');
-        if (sel && sel.options.length <= 1) {
-          const chRes = await fetch('/api/destination-channels');
-          const destChannels = await chRes.json();
-          if (destChannels.length) {
-            sel.innerHTML = destChannels.map(ch => `<option value="${ch.id}">${ch.name} (${ch.weight ?? 0}%)</option>`).join('');
-          }
-        }
-        const selectedId = sel && sel.value ? `?channel_id=${sel.value}` : '';
-        const res = await fetch(`/api/scheduler/matrix${selectedId}`);
-        const data = await res.json();
-        const container = document.getElementById('calendarGrid');
-        if (!data.matrix) {
-          container.innerHTML = '<p class="text-xs text-slate-400 col-span-7 py-6 text-center">Nenhum canal de destino cadastrado ainda.</p>';
-          return;
-        }
-
-        container.innerHTML = data.matrix.map(day => `
-          <div class="bg-studio-950 border border-studio-800 rounded-xl p-3 space-y-2.5">
-            <div class="text-center border-b border-studio-800 pb-2">
-              <span class="text-xs font-extrabold text-white block">${day.date}</span>
-              <span class="text-[10px] text-slate-400 uppercase font-bold tracking-wider">${day.day_name}</span>
-            </div>
-            <div class="space-y-2">
-              ${day.slots.map(s => `
-                <div class="p-2.5 rounded-lg border text-xs transition ${
-                  s.is_filled 
-                    ? 'bg-amber-500/10 border-amber-500/40 text-amber-200' 
-                    : 'bg-studio-900 border-studio-800/80 text-slate-500'
-                }">
-                  <div class="flex justify-between items-center font-bold">
-                    <span class="font-mono text-[11px]">${s.time}</span>
-                    <span class="text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                      s.is_filled ? 'bg-amber-500/20 text-amber-300' : 'bg-studio-800 text-slate-400'
-                    }">
-                      ${s.is_filled ? 'AGENDADO' : 'VAGO'}
-                    </span>
-                  </div>
-                  ${s.is_filled ? `
-                    <p class="text-[11px] font-semibold text-white mt-1.5 line-clamp-2" title="${s.clip.title}">
-                      ${s.clip.title}
-                    </p>
-                    <div class="flex justify-between items-center text-[10px] text-slate-400 mt-2 pt-1 border-t border-amber-500/20 font-mono">
-                      <span>${s.clip.duration}s</span>
-                      <span class="text-amber-400 font-bold">Score ${s.clip.score}</span>
-                    </div>
-                  ` : ''}
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        `).join('');
-      } catch (e) { console.error(e); }
-    }
-
-    async function loadClips() {
-      try {
-        const res = await fetch('/api/clips');
-        const clips = await res.json();
-        const container = document.getElementById('clipsGrid');
-        if (!clips.length) {
-          container.innerHTML = '<p class="text-xs text-slate-400 col-span-3 py-8 text-center">Nenhum clipe gerado ainda. Clique em "Disparar Esteira" para processar o primeiro vídeo.</p>';
-          return;
-        }
-        container.innerHTML = clips.map(c => `
-          <div class="bg-studio-950 border border-studio-800 rounded-2xl p-4 flex flex-col justify-between hover:border-studio-700 transition gap-3">
+      <main class="workspace">
+        <!-- VIEW 1: CLIPES 9:16 -->
+        <section id="view-clips" class="view-panel active">
+          <div class="section-header">
             <div>
-              <div class="flex justify-between items-start mb-2">
-                <span class="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                  Score ${c.score}/100
-                </span>
-                <span class="text-[11px] text-slate-400 font-mono">${c.start}s - ${c.end}s (${c.duration}s)</span>
+              <h2 class="section-title">Biblioteca de Cortes</h2>
+              <p class="section-desc">Revise cortes gerados, ajuste timestamps ou layout 9:16, renderize com legendas e exporte para Shorts, Reels ou TikTok.</p>
+            </div>
+            <div class="filter-pills">
+              <button class="pill-btn active" data-clip-filter="all" onclick="setClipFilter('all', this)">Todos</button>
+              <button class="pill-btn" data-clip-filter="analyzed" onclick="setClipFilter('analyzed', this)">Aguardando render</button>
+              <button class="pill-btn" data-clip-filter="rendered" onclick="setClipFilter('rendered', this)">Prontos (MP4)</button>
+              <button class="pill-btn" data-clip-filter="scheduled" onclick="setClipFilter('scheduled', this)">Agendados</button>
+            </div>
+          </div>
+          <div id="clipsGrid" class="clips-grid"></div>
+        </section>
+
+        <!-- VIEW 2: FILA & ESTEIRA AO VIVO -->
+        <section id="view-queue" class="view-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Fila de Vídeos & Log da Esteira</h2>
+              <p class="section-desc">Acompanhe os vídeos capturados nos canais e dispare o processamento individual quando quiser.</p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="queueStatusFilter" class="select" style="width:170px;" onchange="loadVideosTable()">
+                <option value="">Todos os status</option>
+                <option value="discovered">Descobertos</option>
+                <option value="downloaded">Baixados</option>
+                <option value="transcribed">Transcritos</option>
+                <option value="processed">Processados</option>
+                <option value="error">Com erro</option>
+              </select>
+              <button class="btn btn-sm" onclick="loadVideosTable()">Atualizar</button>
+            </div>
+          </div>
+
+          <div class="split-queue">
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Vídeo</th>
+                    <th>Duração</th>
+                    <th>Cortes</th>
+                    <th>Status</th>
+                    <th>Ação</th>
+                  </tr>
+                </thead>
+                <tbody id="videosTableBody"></tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <strong style="font-size:13px;">Telemetria da Esteira (Tempo Real)</strong>
+                <span class="badge" id="queueStageBadge">idle</span>
               </div>
-              <h4 class="font-bold text-sm text-white line-clamp-2 mt-1">${c.title}</h4>
-              <p class="text-xs text-slate-400 mt-1 line-clamp-2 italic">"${c.hook || 'Momento de alta retenção'}"</p>
-              ${c.media_url ? `
-                <div class="mt-3 rounded-xl overflow-hidden border border-studio-800 bg-black">
-                  <video controls preload="metadata" class="w-full max-h-64 object-contain" src="${c.media_url}"></video>
+              <div id="pipelineLiveLogs" class="log-terminal">
+                <div class="log-line"><span class="log-time">--:--:--</span><span class="log-info">Conectando ao stream...</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- VIEW 3: AGENDA SEMANAL -->
+        <section id="view-calendar" class="view-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Grade Semanal — 4 Vídeos/Dia × 7 Dias</h2>
+              <p class="section-desc">Horários padrão em horário local (11:30, 15:00, 18:30 e 21:00), convertidos automaticamente para UTC no envio real ao YouTube.</p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <select id="calendarChannelSelect" class="select" style="width:240px;" onchange="loadCalendar()"></select>
+              <button class="btn btn-primary btn-sm" onclick="autoFillSchedule()">Auto-preencher grade</button>
+            </div>
+          </div>
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </section>
+
+        <!-- VIEW 4: INSPETOR DE LINHA DO TEMPO (DEDUPLICAÇÃO) -->
+        <section id="view-timeline" class="view-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Inspetor de Deduplicação & Trechos Livres</h2>
+              <p class="section-desc">Veja exatamente quais segundos já foram usados (bloqueados) e quais janelas permanecem inéditas para criar novos cortes.</p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="videoSelectTimeline" class="select" style="width:360px;" onchange="loadVideoTimeline()"></select>
+              <button class="btn btn-sm" onclick="openManualClipModal()">+ Criar corte manual</button>
+            </div>
+          </div>
+
+          <div class="panel" style="display:flex; flex-direction:column; gap:16px;">
+            <div style="display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:11.5px; color:var(--text-secondary);">
+              <span>00:00</span>
+              <span id="timelineSummaryText">Selecione um vídeo</span>
+              <span id="timelineDuration">00:00</span>
+            </div>
+
+            <div id="timelineBar" class="timeline-track"></div>
+
+            <div style="display:flex; gap:18px; font-size:12px; color:var(--text-secondary);">
+              <span style="display:flex; align-items:center; gap:6px;"><span style="width:12px; height:12px; border-radius:2px; background:var(--ok-soft); border:1px solid rgba(48,164,108,0.45);"></span> Trecho livre (disponível)</span>
+              <span style="display:flex; align-items:center; gap:6px;"><span style="width:12px; height:12px; border-radius:2px; background:var(--accent);"></span> Trecho já cortado (bloqueado + margem de segurança)</span>
+            </div>
+
+            <div style="border-top:1px solid var(--border-subtle); padding-top:14px;">
+              <strong style="font-size:13px;">Janelas livres (inéditas) disponíveis para corte</strong>
+              <div id="timelineFreeWindows" class="windows-grid"></div>
+            </div>
+
+            <div style="border-top:1px solid var(--border-subtle); padding-top:14px;">
+              <strong style="font-size:13px;">Trechos já registrados neste vídeo</strong>
+              <div id="timelineUsedList" class="windows-grid"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- VIEW 5: ESTILO & PRESETS (COM PREVIEW 9:16 AO VIVO) -->
+        <section id="view-presets" class="view-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Estilo de Legendas, Enquadramento & VFX</h2>
+              <p class="section-desc">Configure o visual dos seus Shorts antes de renderizar. As mudanças se aplicam imediatamente às próximas renderizações.</p>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="saveStudioPreset()">Salvar preset do estúdio</button>
+          </div>
+
+          <div class="preset-layout">
+            <div class="panel" style="display:flex; flex-direction:column; gap:18px;">
+              <div class="form-grid-2">
+                <div class="field">
+                  <label for="presetCropMode">Enquadramento padrão 9:16</label>
+                  <select id="presetCropMode" class="select" onchange="updatePresetPreview()">
+                    <option value="split_screen">Split-Screen Gamer (Facecam topo + Gameplay)</option>
+                    <option value="blur_bg">16:9 Centralizado + Fundo Blur</option>
+                    <option value="face_tracking">Tela Cheia 9:16 (Center Crop)</option>
+                  </select>
                 </div>
-              ` : ''}
-            </div>
-            <div class="pt-3 border-t border-studio-800 flex flex-wrap justify-between items-center gap-2 text-xs">
-              <span class="text-slate-400">Por: <strong class="text-cyan-400">${c.suggested_by}</strong></span>
-              <div class="flex items-center gap-2">
-                ${c.status === 'analyzed' ? `
-                  <button onclick="renderClip(${c.id})" class="px-2.5 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-bold text-[11px] transition">
-                    Renderizar 9:16
-                  </button>
-                ` : ''}
-                ${c.media_url ? `
-                  <a href="${c.media_url}" download="short_${c.id}.mp4" class="px-2.5 py-1 rounded-lg bg-studio-800 hover:bg-studio-700 text-slate-200 font-semibold text-[11px] transition">
-                    Baixar MP4
-                  </a>
-                ` : ''}
-                <span class="px-2 py-0.5 rounded font-mono text-[10px] uppercase font-bold ${
-                  c.status === 'rendered' || c.status === 'scheduled' || c.status === 'published'
-                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                    : 'bg-studio-800 text-slate-300'
-                }">${c.status}</span>
+                <div class="field">
+                  <label for="presetStyleMode">Animação da legenda</label>
+                  <select id="presetStyleMode" class="select" onchange="updatePresetPreview()">
+                    <option value="word_highlight">Destaque palavra ativa (OpusClip)</option>
+                    <option value="karaoke_pop">Destaque + Pop de escala (CapCut)</option>
+                    <option value="box_caption">Caixa escura legível</option>
+                    <option value="clean_minimal">Minimalista limpa</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-grid-3">
+                <div class="field">
+                  <label for="presetFontSize">Tamanho da fonte (<span id="fontSizeVal">74</span>px)</label>
+                  <input id="presetFontSize" type="range" min="44" max="100" value="74" oninput="updatePresetPreview()">
+                </div>
+                <div class="field">
+                  <label for="presetMarginV">Altura vertical (<span id="marginVVal">460</span>px)</label>
+                  <input id="presetMarginV" type="range" min="180" max="900" value="460" oninput="updatePresetPreview()">
+                </div>
+                <div class="field">
+                  <label for="presetWordsPerLine">Palavras por bloco</label>
+                  <select id="presetWordsPerLine" class="select" onchange="updatePresetPreview()">
+                    <option value="2">2 palavras</option>
+                    <option value="3" selected>3 palavras</option>
+                    <option value="4">4 palavras</option>
+                    <option value="5">5 palavras</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-grid-3">
+                <div class="field">
+                  <label for="presetPrimaryColor">Cor base do texto</label>
+                  <input id="presetPrimaryColor" type="color" class="input" style="height:38px; padding:3px;" value="#FFFFFF" oninput="updatePresetPreview()">
+                </div>
+                <div class="field">
+                  <label for="presetHighlightColor">Cor da palavra ativa</label>
+                  <input id="presetHighlightColor" type="color" class="input" style="height:38px; padding:3px;" value="#FACC15" oninput="updatePresetPreview()">
+                </div>
+                <div class="field">
+                  <label for="presetOutlineColor">Cor do contorno</label>
+                  <input id="presetOutlineColor" type="color" class="input" style="height:38px; padding:3px;" value="#000000" oninput="updatePresetPreview()">
+                </div>
+              </div>
+
+              <div class="form-grid-2">
+                <div class="field">
+                  <label for="presetWatermark">Marca d'água / @canal (opcional)</label>
+                  <input id="presetWatermark" type="text" class="input" placeholder="Ex: @seucanaldecortes" oninput="updatePresetPreview()">
+                </div>
+                <div class="field">
+                  <label for="presetFontName">Fonte do sistema</label>
+                  <select id="presetFontName" class="select" onchange="updatePresetPreview()">
+                    <option value="auto">Automática (melhor fonte instalada)</option>
+                    <option value="DejaVu Sans">DejaVu Sans</option>
+                    <option value="Liberation Sans">Liberation Sans</option>
+                    <option value="Arial">Arial (Windows)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-grid-3">
+                <label class="switch-row">
+                  <span>Legendas ativadas</span>
+                  <input id="presetEnableSubs" type="checkbox" checked onchange="updatePresetPreview()">
+                </label>
+                <label class="switch-row">
+                  <span>Caixa alta (CAPS)</span>
+                  <input id="presetUppercase" type="checkbox" checked onchange="updatePresetPreview()">
+                </label>
+                <label class="switch-row">
+                  <span>VFX Zoom & Shake</span>
+                  <input id="presetEnableVfx" type="checkbox" checked onchange="updatePresetPreview()">
+                </label>
               </div>
             </div>
-          </div>
-        `).join('');
-      } catch (e) { console.error(e); }
-    }
 
-    async function renderClip(clipId) {
-      showToast(`Renderizando clipe #${clipId} em 9:16...`, 'info');
-      try {
-        const res = await fetch(`/api/clips/${clipId}/render`, { method: 'POST' });
-        const data = await res.json();
-        if (!res.ok) {
-          showToast(data.detail || `Erro ao renderizar clipe #${clipId}`, 'error');
-          return;
-        }
-        showToast(`Clipe #${clipId} renderizado com sucesso!`, 'success');
-        loadClips();
-        fetchStats();
-      } catch (e) {
-        showToast(`Erro de rede ao renderizar clipe #${clipId}`, 'error');
-      }
-    }
-
-    async function loadVideosForTimeline() {
-      try {
-        const res = await fetch('/api/videos');
-        allVideos = await res.json();
-        const sel = document.getElementById('videoSelectTimeline');
-        sel.innerHTML = allVideos.map(v => `
-          <option value="${v.id}">${v.title.slice(0, 45)}... (${v.channel_name})</option>
-        `).join('');
-        if (allVideos.length) {
-          loadVideoTimeline();
-        }
-      } catch (e) { console.error(e); }
-    }
-
-    async function loadVideoTimeline() {
-      const vidId = document.getElementById('videoSelectTimeline').value;
-      if (!vidId) return;
-
-      try {
-        const res = await fetch(`/api/videos/${vidId}/timeline`);
-        const data = await res.json();
-        const totalDuration = data.duration || 1800;
-
-        document.getElementById('timelineDuration').innerText = `${Math.floor(totalDuration/60)}:${Math.floor(totalDuration%60).toString().padStart(2, '0')}`;
-
-        const bar = document.getElementById('timelineBar');
-        bar.innerHTML = '';
-
-        // Renderiza blocos usados
-        data.used_segments.forEach(seg => {
-          const leftPct = (seg.start_time / totalDuration) * 100;
-          const widthPct = ((seg.end_time - seg.start_time) / totalDuration) * 100;
-          const block = document.createElement('div');
-          block.className = 'absolute h-full bg-purple-500 hover:bg-purple-400 transition cursor-pointer';
-          block.style.left = `${leftPct}%`;
-          block.style.width = `${Math.max(widthPct, 1)}%`;
-          block.title = `Corte #${seg.id}: ${seg.title} (${seg.start_time}s - ${seg.end_time}s)`;
-          bar.appendChild(block);
-        });
-
-      } catch (e) { console.error(e); }
-    }
-
-    async function loadAIBusEvents() {
-      try {
-        const res = await fetch('/api/ai-bus/events');
-        const events = await res.json();
-        const container = document.getElementById('aiBusLogs');
-        if (!events.length) {
-          container.innerHTML = '<span class="text-slate-500">// Aguardando novos eventos...</span>';
-          return;
-        }
-        container.innerHTML = events.map(e => `
-          <div class="p-2.5 rounded-lg bg-studio-900/60 border border-studio-800 flex items-start gap-2.5">
-            <span class="text-cyan-400 font-bold">[${e.sender} &rarr; ${e.target}]</span>
-            <span class="text-amber-400 font-semibold">${e.type}</span>
-            <span class="text-slate-300 flex-1 truncate font-mono text-[11px]">${JSON.stringify(e.payload)}</span>
-            <span class="text-slate-500 text-[10px] font-mono">${e.created_at ? e.created_at.split('T')[1].slice(0, 8) : ''}</span>
-          </div>
-        `).join('');
-      } catch (e) { console.error(e); }
-    }
-
-    async function loadDestinations() {
-      try {
-        const res = await fetch('/api/destination-channels');
-        const channels = await res.json();
-        const container = document.getElementById('destinationsList');
-        const summaryBar = document.getElementById('weightsSummaryBar');
-        if (!channels.length) {
-          summaryBar.classList.add('hidden');
-          container.innerHTML = '<p class="text-xs text-slate-400">Nenhum canal de destino conectado ainda.</p>';
-          return;
-        }
-        summaryBar.classList.remove('hidden');
-        container.innerHTML = channels.map(c => `
-          <div class="bg-studio-950 border border-studio-800 rounded-xl p-4 flex flex-col justify-between">
-            <div class="flex items-start justify-between">
-              <div>
-                <h3 class="font-bold text-sm text-white">${c.name}</h3>
-                <span class="text-xs text-slate-400 font-mono">ID: ${c.youtube_channel_id || 'ID Pendente de Auth'}</span>
+            <div class="phone-stage">
+              <span style="font-size:11.5px; color:var(--text-muted); font-family:var(--font-mono);">PREVIEW 9:16 (1080×1920)</span>
+              <div class="phone-frame" id="phoneFramePreview">
+                <div class="phone-watermark" id="previewWatermark"></div>
+                <div class="phone-half-top" id="previewTopZone">FACECAM (TOPO)</div>
+                <div class="phone-half-bottom" id="previewBottomZone">GAMEPLAY (BASE)</div>
+                <div class="phone-subtitle-preview" id="previewSubtitle">
+                  OLHA <span id="previewActiveWord">ESSE</span> CLUTCH
+                </div>
               </div>
-              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                c.has_token 
-                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' 
-                  : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-              }">
-                ${c.has_token ? 'TOKEN ATIVO (OAuth)' : 'SIMULAÇÃO / SEM TOKEN'}
+              <span style="font-size:11.5px; color:var(--text-secondary); text-align:center;">
+                O destaque alterna palavra por palavra sincronizado com a fala real.
               </span>
             </div>
-            <div class="mt-4 pt-3 border-t border-studio-800 text-xs text-slate-400 flex flex-wrap justify-between items-center gap-2">
-              <span>Limite: <strong class="text-white">${c.daily_post_limit} vídeos/dia</strong></span>
-              <div class="flex items-center gap-1.5">
-                <span>Peso:</span>
-                <input data-channel-id="${c.id}" id="weightInput-${c.id}" type="number" min="0" max="100" value="${c.weight ?? 0}" oninput="updateWeightSummary()" class="weight-input w-16 bg-studio-900 border border-studio-700 rounded px-1.5 py-0.5 text-white text-center font-mono" />
-                <span class="text-slate-400 font-mono">%</span>
-              </div>
-              <span class="font-mono text-rose-400">${c.scheduled_count} agendados</span>
+          </div>
+        </section>
+
+        <!-- VIEW 6: CANAIS MONITORADOS -->
+        <section id="view-channels" class="view-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Canais Monitorados 24/7</h2>
+              <p class="section-desc">Monitoramento contínuo via Atom/RSS sem gastar cota da API do YouTube. Ative, pause ou adicione novos canais.</p>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-sm" onclick="triggerCheckChannels()">Varrer agora</button>
+              <button class="btn btn-primary btn-sm" onclick="openAddChannelModal()">+ Adicionar canal</button>
             </div>
           </div>
-        `).join('');
-        updateWeightSummary();
-      } catch (e) { console.error(e); }
-    }
+          <div id="channelsList" class="cards-grid-3"></div>
+        </section>
 
-    function updateWeightSummary() {
-      const inputs = Array.from(document.querySelectorAll('.weight-input'));
-      const total = inputs.reduce((acc, el) => acc + Math.max(0, Math.min(100, parseInt(el.value || '0', 10) || 0)), 0);
-      const badge = document.getElementById('weightsTotalBadge');
-      const hint = document.getElementById('weightsHint');
-      const btn = document.getElementById('saveWeightsBtn');
-      if (!badge || !btn) return;
-      badge.textContent = `${total}% / 100%`;
-      if (total === 100) {
-        badge.className = 'px-2.5 py-1 rounded-lg font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
-        hint.classList.add('hidden');
-        btn.disabled = false;
-      } else {
-        badge.className = 'px-2.5 py-1 rounded-lg font-mono font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30';
-        hint.classList.remove('hidden');
-        btn.disabled = true;
-      }
-    }
+        <!-- VIEW 7: CONTAS YOUTUBE & PESOS -->
+        <section id="view-destinations" class="view-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Contas do YouTube & Distribuição por Peso</h2>
+              <p class="section-desc">Conecte contas reais via OAuth 2.0. Sem token conectado, o sistema nunca finge upload e aguarda autorização.</p>
+            </div>
+            <a href="/api/auth/youtube/login" class="btn btn-primary btn-sm" id="btnConnectYoutube">
+              + Conectar conta YouTube (OAuth)
+            </a>
+          </div>
 
-    async function saveAllWeights() {
-      const inputs = Array.from(document.querySelectorAll('.weight-input'));
-      const weights = {};
-      for (const el of inputs) {
-        const cid = el.getAttribute('data-channel-id');
-        weights[cid] = Math.max(0, Math.min(100, parseInt(el.value || '0', 10) || 0));
-      }
-      try {
-        const res = await fetch('/api/destination-channels/weights', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ weights })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          alert(data.detail || 'Erro ao salvar distribuição.');
-          return;
-        }
-        loadDestinations();
-      } catch (e) { console.error(e); }
-    }
+          <div id="oauthWarningBanner" class="alert-banner" style="display:none; margin-bottom:16px;">
+            <span>Arquivo <code>client_secret*.json</code> não encontrado na raiz do projeto. Baixe as credenciais OAuth 2.0 no Google Cloud Console e salve na raiz para conectar contas reais.</span>
+          </div>
 
-    async function toggleDestination(channelId) {
-      try {
-        const res = await fetch(`/api/destination-channels/${channelId}/toggle`, { method: 'PATCH' });
-        if (res.ok) {
-          showToast('Status do canal atualizado!', 'success');
-          loadDestinations();
-        }
-      } catch (e) { console.error(e); }
-    }
+          <div id="weightsSummaryBar" class="panel" style="display:none; margin-bottom:16px; padding:12px 16px;">
+            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:12.5px; color:var(--text-secondary);">Soma dos pesos de distribuição:</span>
+                <span id="weightsTotalBadge" class="badge badge-ok">100% / 100%</span>
+                <span id="weightsHint" style="font-size:12px; color:var(--text-muted); display:none;">A soma dos canais deve fechar exatamente em 100%.</span>
+              </div>
+              <button id="saveWeightsBtn" class="btn btn-primary btn-sm" onclick="saveAllWeights()">Salvar pesos (%)</button>
+            </div>
+          </div>
 
-    let currentActiveTab = 'channels';
-    function switchTab(tab) {
-      currentActiveTab = tab;
-      ['channels', 'calendar', 'clips', 'timeline', 'aibus', 'destinations'].forEach(t => {
-        const btn = document.getElementById('tabBtn' + t.charAt(0).toUpperCase() + t.slice(1));
-        const content = document.getElementById('tabContent' + t.charAt(0).toUpperCase() + t.slice(1));
-        if (!btn || !content) return;
-        if (t === tab) {
-          btn.classList.add('border-brand-500', 'text-white');
-          btn.classList.remove('border-transparent', 'text-slate-400');
-          content.classList.remove('hidden');
-        } else {
-          btn.classList.remove('border-brand-500', 'text-white');
-          btn.classList.add('border-transparent', 'text-slate-400');
-          content.classList.add('hidden');
-        }
-      });
-      refreshActiveTab();
-    }
+          <div id="destinationsList" class="cards-grid-2"></div>
+        </section>
 
-    function refreshActiveTab() {
-      if (currentActiveTab === 'channels') loadChannels();
-      if (currentActiveTab === 'calendar') loadCalendar();
-      if (currentActiveTab === 'clips') loadClips();
-      if (currentActiveTab === 'timeline') loadVideosForTimeline();
-      if (currentActiveTab === 'aibus') loadAIBusEvents();
-      if (currentActiveTab === 'destinations') loadDestinations();
-    }
+        <!-- VIEW 8: CONFIGURAÇÕES (BYOK IA + SISTEMA + AI BUS) -->
+        <section id="view-settings" class="view-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Provedores de IA (BYOK) & Configurações do Motor</h2>
+              <p class="section-desc">Todas as configurações abaixo são salvas localmente no banco SQLite e lidas diretamente pelo analisador, transcritor e agendador.</p>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="saveSystemSettings()">Salvar configurações</button>
+          </div>
 
-    function showToast(message, type = 'info') {
-      let toast = document.getElementById('globalToast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'globalToast';
-        toast.className = 'fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl text-xs font-bold shadow-2xl border transition-all duration-300';
-        document.body.appendChild(toast);
-      }
-      const styles = {
-        info: 'bg-studio-900 border-cyan-500/40 text-cyan-300',
-        success: 'bg-studio-900 border-emerald-500/40 text-emerald-300',
-        error: 'bg-studio-900 border-rose-500/40 text-rose-300',
-      };
-      toast.className = `fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl text-xs font-bold shadow-2xl border transition-all duration-300 ${styles[type] || styles.info}`;
-      toast.textContent = message;
-      toast.style.opacity = '1';
-      clearTimeout(window._toastTimer);
-      window._toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 4000);
-    }
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:18px;">
+            <div class="panel" style="display:flex; flex-direction:column; gap:14px;">
+              <strong style="font-size:13.5px;">Análise de Momentos Virais (LLM Real)</strong>
+              <div class="field">
+                <label for="setAiProvider">Provedor ativo</label>
+                <select id="setAiProvider" class="select">
+                  <option value="offline">Offline Híbrido (Picos de Áudio WAV + Gatilhos — Gratuito)</option>
+                  <option value="gemini">Google Gemini (gemini-2.5-flash)</option>
+                  <option value="groq">Groq Cloud (llama-3.3-70b + Whisper Turbo)</option>
+                  <option value="openai">OpenAI (gpt-4o-mini + Whisper)</option>
+                  <option value="claude">Anthropic Claude (claude-3-5-haiku)</option>
+                  <option value="ollama">Ollama Local (100% offline)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="setGeminiKey">Gemini API Key</label>
+                <input id="setGeminiKey" type="password" class="input input-mono" placeholder="AIza...">
+              </div>
+              <div class="field">
+                <label for="setGroqKey">Groq API Key (usada também para Whisper Cloud)</label>
+                <input id="setGroqKey" type="password" class="input input-mono" placeholder="gsk_...">
+              </div>
+              <div class="field">
+                <label for="setOpenaiKey">OpenAI API Key</label>
+                <input id="setOpenaiKey" type="password" class="input input-mono" placeholder="sk-...">
+              </div>
+              <div class="field">
+                <label for="setClaudeKey">Anthropic API Key</label>
+                <input id="setClaudeKey" type="password" class="input input-mono" placeholder="sk-ant-...">
+              </div>
+              <div class="form-grid-2">
+                <div class="field">
+                  <label for="setOllamaUrl">Ollama URL</label>
+                  <input id="setOllamaUrl" type="text" class="input input-mono" placeholder="http://localhost:11434">
+                </div>
+                <div class="field">
+                  <label for="setOllamaModel">Modelo Ollama</label>
+                  <input id="setOllamaModel" type="text" class="input input-mono" placeholder="llama3.1">
+                </div>
+              </div>
+            </div>
 
-    async function triggerCheckChannels() {
-      showToast('Verificando novos vídeos nos canais...', 'info');
-      const res = await fetch('/api/channels/check-now', { method: 'POST' });
-      const data = await res.json();
-      showToast(data.message || 'Canais verificados!', 'success');
-      fetchStats();
-      loadChannels();
-    }
+            <div class="panel" style="display:flex; flex-direction:column; gap:14px;">
+              <strong style="font-size:13.5px;">Pipeline, Duração, Fuso Horário & yt-dlp</strong>
+              <div class="form-grid-2">
+                <div class="field">
+                  <label for="setMinDur">Duração mínima (seg)</label>
+                  <input id="setMinDur" type="number" min="5" max="55" class="input input-mono" value="20">
+                </div>
+                <div class="field">
+                  <label for="setMaxDur">Duração máxima Short (seg)</label>
+                  <input id="setMaxDur" type="number" min="10" max="60" class="input input-mono" value="58">
+                </div>
+              </div>
+              <div class="form-grid-2">
+                <div class="field">
+                  <label for="setTimezone">Fuso horário de publicação</label>
+                  <select id="setTimezone" class="select">
+                    <option value="America/Sao_Paulo">America/Sao_Paulo (BRT / UTC-3)</option>
+                    <option value="America/Manaus">America/Manaus (AMT / UTC-4)</option>
+                    <option value="Europe/Lisbon">Europe/Lisbon (WET)</option>
+                    <option value="UTC">UTC</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="setWhisperModel">Modelo faster-whisper local</label>
+                  <select id="setWhisperModel" class="select">
+                    <option value="tiny">tiny (muito rápido)</option>
+                    <option value="base">base (equilibrado)</option>
+                    <option value="small">small (mais preciso)</option>
+                    <option value="medium">medium (GPU recomendada)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field">
+                <label for="setCookiesBrowser">Cookies do navegador para yt-dlp (opcional)</label>
+                <select id="setCookiesBrowser" class="select">
+                  <option value="">Nenhum (ou usar data/cookies.txt)</option>
+                  <option value="chrome">Google Chrome</option>
+                  <option value="firefox">Mozilla Firefox</option>
+                  <option value="brave">Brave</option>
+                  <option value="edge">Microsoft Edge</option>
+                </select>
+              </div>
+              <label class="switch-row">
+                <span>Agendar automaticamente clipes após renderizar</span>
+                <input id="setAutoSchedule" type="checkbox" checked>
+              </label>
 
-    async function triggerPipelineCycle() {
-      showToast('Esteira disparada em segundo plano! Acompanhe os números em tempo real.', 'info');
-      await fetch('/api/pipeline/run-cycle', { method: 'POST' });
-      setTimeout(() => { fetchStats(); refreshActiveTab(); }, 3000);
-    }
+              <div style="border-top:1px solid var(--border-subtle); padding-top:12px;">
+                <strong style="font-size:12.5px; display:block; margin-bottom:8px;">Barramento Multi-IA (Antigravity ⇄ Claude Code)</strong>
+                <div id="aiBusLogs" class="log-terminal" style="max-height:180px;"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
 
-    async function autoFillSchedule() {
-      const res = await fetch('/api/scheduler/auto-fill', { method: 'POST' });
-      const data = await res.json();
-      showToast(data.message || 'Grade atualizada!', 'success');
-      loadCalendar();
-      fetchStats();
-    }
+  <!-- MODAL: EDITAR CLIPE -->
+  <div class="modal-backdrop" id="editClipModal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="editClipModalTitle">Editar clipe</h3>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('editClipModal')">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editClipId">
+        <div class="field">
+          <label for="editClipTitle">Título do Short</label>
+          <input id="editClipTitle" type="text" class="input">
+        </div>
+        <div class="field">
+          <label for="editClipHook">Frase de gancho (primeiros 3s)</label>
+          <input id="editClipHook" type="text" class="input">
+        </div>
+        <div class="form-grid-2">
+          <div class="field">
+            <label for="editClipStart">Início (segundos)</label>
+            <input id="editClipStart" type="number" step="0.5" min="0" class="input input-mono">
+          </div>
+          <div class="field">
+            <label for="editClipEnd">Fim (segundos — máx. 60s de duração)</label>
+            <input id="editClipEnd" type="number" step="0.5" min="5" class="input input-mono">
+          </div>
+        </div>
+        <div class="field">
+          <label for="editClipCrop">Layout 9:16</label>
+          <select id="editClipCrop" class="select">
+            <option value="split_screen">Split-Screen Gamer (Facecam + Gameplay)</option>
+            <option value="blur_bg">16:9 Centralizado + Fundo Blur</option>
+            <option value="face_tracking">Tela Cheia 9:16 (Center Crop)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-sm" onclick="closeModal('editClipModal')">Cancelar</button>
+        <button class="btn btn-sm" onclick="saveClipEdits(false)">Salvar</button>
+        <button class="btn btn-primary btn-sm" onclick="saveClipEdits(true)">Salvar e renderizar</button>
+      </div>
+    </div>
+  </div>
 
-    // Conexão em tempo real (SSE) + Auto-reload automático quando houver git pull
-    let knownBootId = null;
-    let lastSnapshot = '';
-    function startRealtimeStream() {
-      const es = new EventSource('/api/events/stream');
-      es.onmessage = (ev) => {
-        try {
-          const data = JSON.parse(ev.data);
-          if (data.boot_id) {
-            if (knownBootId && knownBootId !== data.boot_id) {
-              showToast('Nova atualização detectada! Recarregando painel...', 'info');
-              setTimeout(() => window.location.reload(), 600);
-              return;
-            }
-            knownBootId = data.boot_id;
-          }
-          if (data.status === 'online') {
-            document.getElementById('statChannels').textContent = data.monitored_channels;
-            document.getElementById('statVideos').textContent = data.videos_tracked;
-            document.getElementById('statClips').textContent = `${data.clips_rendered} / ${data.clips_total}`;
-            document.getElementById('statScheduled').textContent = data.scheduled_posts;
-            document.getElementById('statDestinations').textContent = data.destination_channels;
-            const snap = `${data.videos_tracked}-${data.clips_total}-${data.clips_rendered}-${data.scheduled_posts}-${data.destination_channels}`;
-            if (lastSnapshot && lastSnapshot !== snap) {
-              refreshActiveTab();
-            }
-            lastSnapshot = snap;
-          }
-        } catch (e) { console.error(e); }
-      };
-      es.onerror = () => {
-        // Quando o servidor reinicia após git pull, o EventSource reconecta automaticamente e detecta o novo boot_id
-      };
-    }
+  <!-- MODAL: CRIAR CORTE MANUAL -->
+  <div class="modal-backdrop" id="manualClipModal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Criar corte manual sem duplicidade</h3>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('manualClipModal')">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="manualClipTitle">Título do Short</label>
+          <input id="manualClipTitle" type="text" class="input" placeholder="Ex: Reação inesperada na partida">
+        </div>
+        <div class="form-grid-2">
+          <div class="field">
+            <label for="manualClipStart">Início (segundos)</label>
+            <input id="manualClipStart" type="number" step="1" min="0" class="input input-mono" value="10">
+          </div>
+          <div class="field">
+            <label for="manualClipEnd">Fim (segundos)</label>
+            <input id="manualClipEnd" type="number" step="1" min="15" class="input input-mono" value="45">
+          </div>
+        </div>
+        <div class="field">
+          <label for="manualClipCrop">Layout 9:16</label>
+          <select id="manualClipCrop" class="select">
+            <option value="split_screen">Split-Screen Gamer</option>
+            <option value="blur_bg">Fundo Blur 16:9</option>
+            <option value="face_tracking">Center Crop 9:16</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-sm" onclick="closeModal('manualClipModal')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="submitManualClip()">Registrar corte</button>
+      </div>
+    </div>
+  </div>
 
-    // Inicialização
-    fetchStats();
-    loadChannels();
-    startRealtimeStream();
-  </script>
+  <!-- MODAL: ADICIONAR CANAL FONTE -->
+  <div class="modal-backdrop" id="addChannelModal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Adicionar canal para monitoramento 24/7</h3>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('addChannelModal')">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="newChannelInput">URL, @handle ou Channel ID (UC...)</label>
+          <input id="newChannelInput" type="text" class="input" placeholder="https://www.youtube.com/@alanzoka ou @casimito">
+        </div>
+        <div class="field">
+          <label for="newChannelName">Nome personalizado (opcional)</label>
+          <input id="newChannelName" type="text" class="input" placeholder="Deixe vazio para puxar o nome oficial">
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-sm" onclick="closeModal('addChannelModal')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" id="btnSubmitChannel" onclick="submitNewChannel()">Adicionar canal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: PACOTE EXPORTAÇÃO (TIKTOK / REELS / KWAI) -->
+  <div class="modal-backdrop" id="exportPackModal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Kit de postagem (TikTok / Reels / Kwai)</h3>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('exportPackModal')">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="exportCaptionText">Legenda & Hashtags prontas</label>
+          <textarea id="exportCaptionText" rows="6" class="textarea"></textarea>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <a id="exportDownloadLink" class="btn btn-sm" download>Baixar MP4 9:16</a>
+        <button class="btn btn-primary btn-sm" onclick="copyExportCaption()">Copiar legenda</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="globalToast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="/static/app.js"></script>
 </body>
 </html>

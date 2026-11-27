@@ -123,12 +123,30 @@ def init_db():
 
         # Seed System Settings
         default_settings = [
-            ("AI_PROVIDER", "gemini", "Provedor padrão de IA (gemini, groq, openai, ollama, claude)"),
+            ("AI_PROVIDER", "offline", "Provedor padrão de IA (offline, gemini, groq, openai, claude, ollama)"),
             ("WHISPER_MODEL", "base", "Modelo local de transcrição faster-whisper (tiny, base, small, medium)"),
             ("CROP_MODE", "split_screen", "Modo padrão de corte 9:16 (split_screen, face_tracking, blur_bg)"),
             ("MAX_CLIP_DURATION", "58", "Duração máxima do Short em segundos (máximo 60)"),
             ("MIN_CLIP_DURATION", "20", "Duração mínima do Short em segundos"),
             ("AUTO_SCHEDULE", "true", "Agendar automaticamente clipes recém-gerados nos próximos slots vagos"),
+            ("TIMEZONE", "America/Sao_Paulo", "Fuso horário IANA usado para converter publishAt do YouTube"),
+            ("YT_COOKIES_BROWSER", "", "Navegador opcional para cookies do yt-dlp (chrome, firefox, brave)"),
+            ("STUDIO_PRESET_JSON", json.dumps({
+                "font_name": "auto",
+                "font_size": 74,
+                "primary_color": "#FFFFFF",
+                "highlight_color": "#FACC15",
+                "outline_color": "#000000",
+                "outline_width": 6,
+                "shadow_depth": 3,
+                "margin_v": 460,
+                "words_per_line": 3,
+                "uppercase": True,
+                "style_mode": "word_highlight",
+                "watermark_text": "",
+                "enable_vfx": True,
+                "enable_subtitles": True
+            }), "Preset visual de legendas, VFX e marca d'água"),
         ]
         for k, v, desc in default_settings:
             s_exist = db.query(SystemSetting).filter(SystemSetting.key == k).first()

@@ -1,38 +1,63 @@
 """
 POST SCHEDULING ENGINE (4 VÍDEOS POR DIA PARA 7 DIAS POR CANAL)
-Distribui os clipes renderizados em uma matriz de agendamento de 4 horários diários
-ao longo de 7 dias (28 slots por canal de monetização).
+Distribui clipes realmente renderizados (MP4 válido > 4KB em disco) em uma matriz de 4 horários
+diários ao longo de 7 dias (28 slots por canal), com pesos em % e dias da semana em PT-BR.
 """
 
+import os
 import json
 import datetime
+from collections import defaultdict, deque
 from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
-from app.database.models import DestinationChannel, ClipSegment, ScheduledPost
+from sqlalchemy.orm import Session, joinedload
+from app.database.models import DestinationChannel, ClipSegment, ScheduledPost, SystemSetting
 
 DEFAULT_SLOTS = ["11:30", "15:00", "18:30", "21:00"]
+
+PT_BR_WEEKDAYS = [
+    "Segunda-feira",
+    "Terça-feira",
+    "Quarta-feira",
+    "Quinta-feira",
+    "Sexta-feira",
+    "Sábado",
+    "Domingo",
+]
+
+
+def _has_valid_rendered_file(clip: Optional[ClipSegment]) -> bool:
+    return bool(
+        clip
+        and clip.clip_path
+        and os.path.exists(clip.clip_path)
+        and os.path.getsize(clip.clip_path) > 4096
+    )
+
 
 class PostScheduler:
     def __init__(self, db: Session):
         self.db = db
 
+    def is_auto_schedule_enabled(self) -> bool:
+        row = self.db.query(SystemSetting).filter(SystemSetting.key == "AUTO_SCHEDULE").first()
+        if not row or not row.value:
+            return True
+        return row.value.strip().lower() in ("true", "1", "yes", "sim")
+
     def get_channel_slots(self, channel: DestinationChannel) -> List[str]:
         if not channel.posting_times:
             return DEFAULT_SLOTS
         try:
-            return json.loads(channel.posting_times)
+            parsed = json.loads(channel.posting_times)
+            return parsed if isinstance(parsed, list) and parsed else DEFAULT_SLOTS
         except Exception:
             return DEFAULT_SLOTS
 
     def get_upcoming_empty_slots(
         self,
         channel_id: int,
-        days_ahead: int = 7
+        days_ahead: int = 7,
     ) -> List[datetime.datetime]:
-        """
-        Retorna os próximos horários vagos (sem nenhum post agendado)
-        para os próximos N dias, considerando os 4 horários diários.
-        """
         channel = self.db.query(DestinationChannel).filter(DestinationChannel.id == channel_id).first()
         if not channel:
             return []
@@ -50,12 +75,9 @@ class PostScheduler:
                     hour, minute = 12, 0
 
                 slot_dt = datetime.datetime.combine(current_date, datetime.time(hour, minute))
-                
-                # Ignora horários que já passaram hoje
                 if slot_dt <= now:
                     continue
 
-                # Verifica se já existe post agendado para este slot no canal (com tolerância de 30 min)
                 start_window = slot_dt - datetime.timedelta(minutes=30)
                 end_window = slot_dt + datetime.timedelta(minutes=30)
 
@@ -64,24 +86,24 @@ class PostScheduler:
                     .filter(ScheduledPost.destination_channel_id == channel_id)
                     .filter(ScheduledPost.scheduled_for >= start_window)
                     .filter(ScheduledPost.scheduled_for <= end_window)
-                    .filter(ScheduledPost.status.in_(["pending", "scheduled_on_youtube", "published"]))
+                    .filter(ScheduledPost.status.in_(["pending", "awaiting_oauth", "scheduled_on_youtube", "published"]))
                     .first()
                 )
-
                 if not existing:
                     empty_slots.append(slot_dt)
 
         return empty_slots
 
     def schedule_clip(self, clip_id: int, destination_channel_id: Optional[int] = None) -> Optional[ScheduledPost]:
-        """
-        Agenda um clipe renderizado no primeiro slot disponível do canal de destino.
-        """
         clip = self.db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
         if not clip:
             raise ValueError(f"Clipe #{clip_id} não encontrado.")
 
-        # Se o canal não for especificado, pega o primeiro canal ativo
+        if not _has_valid_rendered_file(clip):
+            raise FileNotFoundError(
+                f"Clipe #{clip_id} não possui arquivo MP4 renderizado válido em disco."
+            )
+
         if destination_channel_id is None:
             dest = self.db.query(DestinationChannel).filter(DestinationChannel.is_active == True).first()
             if not dest:
@@ -90,7 +112,6 @@ class PostScheduler:
 
         empty_slots = self.get_upcoming_empty_slots(destination_channel_id, days_ahead=14)
         if not empty_slots:
-            # Se todos os slots dos próximos 14 dias estiverem lotados, agenda para o 15º dia
             target_dt = datetime.datetime.now() + datetime.timedelta(days=15)
         else:
             target_dt = empty_slots[0]
@@ -99,26 +120,25 @@ class PostScheduler:
             clip_id=clip.id,
             destination_channel_id=destination_channel_id,
             scheduled_for=target_dt,
-            status="pending"
+            status="pending",
         )
         self.db.add(post)
         clip.status = "scheduled"
         self.db.commit()
         self.db.refresh(post)
-
         return post
 
-    def auto_schedule_all_rendered(self) -> int:
+    def auto_schedule_all_rendered(self, force: bool = False) -> int:
         """
-        Percorre todos os clipes com status 'rendered' e distribui automaticamente
-        respeitando o peso (weight) de cada canal ativo e o horário vago mais próximo.
+        Distribui automaticamente clipes com status 'rendered' e MP4 válido em disco,
+        intercalando streamers e respeitando os pesos (%) de cada canal ativo.
         """
+        if not force and not self.is_auto_schedule_enabled():
+            return 0
+
         active_channels = self.db.query(DestinationChannel).filter(DestinationChannel.is_active == True).all()
         if not active_channels:
             return 0
-
-        from collections import defaultdict, deque
-        from sqlalchemy.orm import joinedload
 
         unassigned_clips = (
             self.db.query(ClipSegment)
@@ -127,8 +147,11 @@ class PostScheduler:
             .order_by(ClipSegment.virality_score.desc())
             .all()
         )
+        unassigned_clips = [c for c in unassigned_clips if _has_valid_rendered_file(c)]
+        if not unassigned_clips:
+            return 0
 
-        # Agrupa por streamer (channel_id de origem) e intercala 1 de cada por rodada
+        # Intercala 1 clipe por streamer por rodada
         by_streamer: Dict[str, deque] = defaultdict(deque)
         for clip in unassigned_clips:
             streamer_key = clip.video.channel_id if clip.video else str(clip.video_id)
@@ -151,7 +174,6 @@ class PostScheduler:
             return 0
 
         scheduled_count = 0
-
         for clip in mixed_clips:
             best_channel = None
             best_score: Optional[tuple] = None
@@ -162,7 +184,7 @@ class PostScheduler:
                 active_posts_count = (
                     self.db.query(ScheduledPost)
                     .filter(ScheduledPost.destination_channel_id == ch.id)
-                    .filter(ScheduledPost.status.in_(["pending", "scheduled_on_youtube"]))
+                    .filter(ScheduledPost.status.in_(["pending", "awaiting_oauth", "scheduled_on_youtube"]))
                     .count()
                 )
                 ratio = active_posts_count / target_share
@@ -189,16 +211,11 @@ class PostScheduler:
         return scheduled_count
 
     def reallocate_overdue_posts(self) -> int:
-        """
-        Verifica posts agendados cuja data/hora (scheduled_for) já passou
-        e que ainda NÃO foram postados (status 'pending' ou 'failed', sem youtube_video_id).
-        Realoca cada um para o próximo slot futuro disponível no mesmo canal.
-        """
         now = datetime.datetime.now()
         overdue_posts = (
             self.db.query(ScheduledPost)
             .filter(ScheduledPost.scheduled_for < now)
-            .filter(ScheduledPost.status.in_(["pending", "failed"]))
+            .filter(ScheduledPost.status.in_(["pending", "awaiting_oauth", "failed"]))
             .filter(ScheduledPost.youtube_video_id.is_(None))
             .order_by(ScheduledPost.scheduled_for.asc())
             .all()
@@ -207,17 +224,13 @@ class PostScheduler:
         reallocated_count = 0
         for post in overdue_posts:
             empty_slots = self.get_upcoming_empty_slots(post.destination_channel_id, days_ahead=14)
-            if empty_slots:
-                target_dt = empty_slots[0]
-            else:
-                target_dt = now + datetime.timedelta(days=15)
+            target_dt = empty_slots[0] if empty_slots else (now + datetime.timedelta(days=15))
 
             post.scheduled_for = target_dt
             post.status = "pending"
             post.error_log = None
             if post.clip:
                 post.clip.status = "scheduled"
-            # Flush imediatamente para que o próximo post da fila não pegue o mesmo slot
             self.db.flush()
             reallocated_count += 1
 
@@ -227,10 +240,6 @@ class PostScheduler:
         return reallocated_count
 
     def get_calendar_matrix(self, channel_id: int, days: int = 7) -> Dict[str, Any]:
-        """
-        Retorna a matriz completa do calendário dos próximos 7 dias com 4 vídeos/dia
-        para renderização na interface web!
-        """
         channel = self.db.query(DestinationChannel).filter(DestinationChannel.id == channel_id).first()
         if not channel:
             return {"error": "Canal não encontrado"}
@@ -261,24 +270,30 @@ class PostScheduler:
                     .filter(ScheduledPost.destination_channel_id == channel_id)
                     .filter(ScheduledPost.scheduled_for >= start_w)
                     .filter(ScheduledPost.scheduled_for <= end_w)
+                    .filter(ScheduledPost.status != "cancelled")
                     .first()
                 )
 
                 if post and post.clip:
                     total_scheduled += 1
+                    has_mp4 = _has_valid_rendered_file(post.clip)
+                    has_thumb = bool(post.clip.thumbnail_path and os.path.exists(post.clip.thumbnail_path))
                     slot_info = {
                         "time": s_str,
                         "datetime": slot_dt.isoformat(),
                         "is_filled": True,
                         "post_id": post.id,
                         "status": post.status,
+                        "youtube_url": post.youtube_url,
+                        "error_log": post.error_log,
                         "clip": {
                             "id": post.clip.id,
                             "title": post.clip.title,
                             "score": post.clip.virality_score,
-                            "duration": post.clip.duration,
-                            "thumbnail": post.clip.thumbnail_path
-                        }
+                            "duration": round(float(post.clip.duration or 0), 1),
+                            "media_url": f"/media/clips/{os.path.basename(post.clip.clip_path)}" if has_mp4 else None,
+                            "thumbnail_url": f"/media/thumbnails/{os.path.basename(post.clip.thumbnail_path)}" if has_thumb else None,
+                        },
                     }
                 else:
                     slot_info = {
@@ -287,15 +302,18 @@ class PostScheduler:
                         "is_filled": False,
                         "post_id": None,
                         "status": "empty",
-                        "clip": None
+                        "youtube_url": None,
+                        "error_log": None,
+                        "clip": None,
                     }
 
                 day_slots_data.append(slot_info)
 
             matrix.append({
                 "date": day_date.strftime("%d/%m/%Y"),
-                "day_name": day_date.strftime("%A"),
-                "slots": day_slots_data
+                "day_name": PT_BR_WEEKDAYS[day_date.weekday()],
+                "is_today": d == 0,
+                "slots": day_slots_data,
             })
 
         return {
@@ -304,5 +322,5 @@ class PostScheduler:
             "total_slots": total_slots,
             "filled_slots": total_scheduled,
             "empty_slots": total_slots - total_scheduled,
-            "matrix": matrix
+            "matrix": matrix,
         }

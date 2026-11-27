@@ -111,12 +111,12 @@ class TestShortsClipPipeline(unittest.TestCase):
         self.assertTrue(windows[0]["end"] <= 100.0)
 
     def test_02_scheduler_matrix(self):
-        """Testa agendamento dos 4 vídeos/dia para os próximos 7 dias (28 slots)"""
+        """Testa agendamento dos 4 vídeos/dia para os próximos 7 dias (28 slots) com validação de MP4 real"""
         dedup = DeduplicationEngine(self.db)
         scheduler = PostScheduler(self.db)
 
-        # Cria 3 clipes com status 'rendered'
-        clips = []
+        # Cria 3 clipes com status 'rendered' e arquivos MP4 válidos (> 4KB) + 1 arquivo vazio (0 bytes) que deve ser ignorado
+        created_files = []
         for i in range(3):
             c = dedup.register_segment(
                 video_id="test_gta6_alanzoka",
@@ -125,22 +125,48 @@ class TestShortsClipPipeline(unittest.TestCase):
                 title=f"Clipe de Teste #{i+1}",
                 virality_score=85 + i
             )
+            fake_mp4 = f"./data/clips/_test_sched_{i}.mp4"
+            with open(fake_mp4, "wb") as f:
+                f.write(b"\x00" * 8192)
+            created_files.append(fake_mp4)
+            c.clip_path = fake_mp4
             c.status = "rendered"
-            clips.append(c)
+
+        # Clipe com arquivo de 0 bytes NÃO pode ser agendado
+        empty_clip = dedup.register_segment(
+            video_id="test_gta6_alanzoka",
+            start_time=900.0,
+            end_time=930.0,
+            title="Clipe Vazio 0 bytes",
+            virality_score=99
+        )
+        empty_mp4 = "./data/clips/_test_sched_empty.mp4"
+        with open(empty_mp4, "wb") as f:
+            pass
+        created_files.append(empty_mp4)
+        empty_clip.clip_path = empty_mp4
+        empty_clip.status = "rendered"
         self.db.commit()
 
-        # Executa auto agendamento
-        count = scheduler.auto_schedule_all_rendered()
-        self.assertEqual(count, 3, "Deveria agendar 3 clipes")
+        try:
+            count = scheduler.auto_schedule_all_rendered()
+            self.assertEqual(count, 3, "Deveria agendar apenas os 3 clipes com MP4 válido (> 4KB)")
 
-        # Verifica matriz semanal de 7 dias
-        matrix_data = scheduler.get_calendar_matrix(self.dest.id, days=7)
-        self.assertEqual(matrix_data["total_slots"], 28)
-        self.assertEqual(matrix_data["filled_slots"], 3)
-        self.assertEqual(matrix_data["empty_slots"], 25)
+            matrix_data = scheduler.get_calendar_matrix(self.dest.id, days=7)
+            self.assertEqual(matrix_data["total_slots"], 28)
+            self.assertEqual(matrix_data["filled_slots"], 3)
+            self.assertEqual(matrix_data["empty_slots"], 25)
+            # Dias da semana em Português (PT-BR)
+            pt_days = {"Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"}
+            for day in matrix_data["matrix"]:
+                self.assertIn(day["day_name"], pt_days)
+        finally:
+            for p in created_files:
+                if os.path.exists(p):
+                    os.remove(p)
 
     def test_03_subtitles_karaoke_engine(self):
-        """Testa geração de legendas dinâmicas .ass com highlight de palavras"""
+        """Testa geração de legendas dinâmicas .ass com destaque palavra ativa"""
         engine = SubtitleEngine()
         words = [
             {"word": "OLHA", "start": 10.0, "end": 10.4},
@@ -160,9 +186,9 @@ class TestShortsClipPipeline(unittest.TestCase):
         self.assertTrue(os.path.exists(out))
         with open(out, "r", encoding="utf-8") as f:
             content = f.read()
-        self.assertIn("Style: Karaoke", content)
+        self.assertIn("Style: Main", content)
         self.assertIn("Dialogue:", content)
-        self.assertIn("{\\k", content) # Marcação karaoke presente!
+        self.assertIn("{\\c&H0015CCFA&}OLHA", content)
         if os.path.exists(test_ass_file):
             os.remove(test_ass_file)
 
