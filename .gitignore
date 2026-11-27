@@ -8,6 +8,12 @@ venv/
 env/
 .venv/
 
+# Secrets & OAuth Tokens
+client_secret*.json
+client_secrets*.json
+data/tokens/*
+!data/tokens/.gitkeep
+
 # Data & Large Media
 data/downloads/*
 !data/downloads/.gitkeep

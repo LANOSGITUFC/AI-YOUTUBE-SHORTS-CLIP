@@ -13,14 +13,31 @@ from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
 from app.database.models import DestinationChannel
 
+import glob
+
 TOKENS_DIR = "./data/tokens"
-CLIENT_SECRETS_FILE = "./client_secrets.json"
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
     "https://www.googleapis.com/auth/youtube.force-ssl"
 ]
+
+def get_client_secrets_path() -> Optional[str]:
+    """Descobre automaticamente qualquer variação de nome do client_secret do Google"""
+    candidates = [
+        "./client_secrets.json",
+        "./client_secret.json",
+        "client_secrets.json",
+        "client_secret.json"
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    matches = glob.glob("./client_secret*.json") + glob.glob("client_secret*.json")
+    if matches:
+        return matches[0]
+    return None
 
 class YouTubeAuthManager:
     def __init__(self, db: Session):
@@ -31,14 +48,15 @@ class YouTubeAuthManager:
         """
         Gera a URL de consentimento do Google para o usuário logar na conta do YouTube.
         """
-        if not os.path.exists(CLIENT_SECRETS_FILE):
+        secrets_file = get_client_secrets_path()
+        if not secrets_file:
             raise FileNotFoundError(
-                f"Arquivo '{CLIENT_SECRETS_FILE}' não encontrado! "
-                "Baixe o arquivo de credenciais OAuth 2.0 do Google Cloud Console e coloque na raiz do projeto."
+                "Arquivo de credenciais 'client_secret*.json' não encontrado na raiz do projeto! "
+                "Baixe o arquivo de credenciais OAuth 2.0 do Google Cloud Console."
             )
 
         flow = Flow.from_client_secrets_file(
-            CLIENT_SECRETS_FILE,
+            secrets_file,
             scopes=SCOPES,
             redirect_uri=redirect_uri
         )
@@ -59,8 +77,12 @@ class YouTubeAuthManager:
         """
         Troca o authorization code pelo Refresh Token permanente e salva no banco.
         """
+        secrets_file = get_client_secrets_path()
+        if not secrets_file:
+            raise FileNotFoundError("Arquivo 'client_secret*.json' não encontrado na raiz.")
+
         flow = Flow.from_client_secrets_file(
-            CLIENT_SECRETS_FILE,
+            secrets_file,
             scopes=SCOPES,
             redirect_uri=redirect_uri
         )
@@ -140,11 +162,12 @@ def run_cli_login(channel_name: str = "Novo Canal"):
     from google_auth_oauthlib.flow import InstalledAppFlow
     from app.database.session import SessionLocal
 
-    if not os.path.exists(CLIENT_SECRETS_FILE):
-        print(f"❌ Erro: Crie o arquivo '{CLIENT_SECRETS_FILE}' com suas credenciais do Google Cloud.")
+    secrets_file = get_client_secrets_path()
+    if not secrets_file:
+        print("❌ Erro: Arquivo 'client_secret*.json' não encontrado na raiz.")
         return
 
-    flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(secrets_file, SCOPES)
     creds = flow.run_local_server(port=8080, prompt="consent", access_type="offline")
 
     with SessionLocal() as db:
