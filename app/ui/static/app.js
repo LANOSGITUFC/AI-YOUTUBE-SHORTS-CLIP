@@ -196,7 +196,7 @@ function startRealtimeStream() {
       applyStatusData(data);
 
       const snap = `${data.videos_tracked}-${data.clips_total}-${data.clips_rendered}-${data.scheduled_posts}-${data.destination_channels}-${data.monitored_channels}`;
-      if (lastSnapshot && lastSnapshot !== snap) {
+      if (lastSnapshot && lastSnapshot !== snap && !dndActive && !document.getElementById('editPostModal')?.classList.contains('open')) {
         refreshCurrentView();
       }
       lastSnapshot = snap;
@@ -284,6 +284,7 @@ function setClipFilter(filter, btnEl) {
 }
 
 async function loadClips() {
+  loadClipQueue();
   try {
     const res = await fetch('/api/clips');
     clipsCache = await res.json();
@@ -394,8 +395,15 @@ async function renderClip(clipId) {
   }
 }
 
-function openEditClipModal(clipId) {
-  const clip = clipsCache.find((c) => c.id === clipId);
+async function openEditClipModal(clipId) {
+  let clip = clipsCache.find((c) => c.id === clipId);
+  if (!clip) {
+    // aberto a partir da agenda: o clipe pode não estar carregado na biblioteca
+    try {
+      const res = await fetch(`/api/clips/${clipId}`);
+      if (res.ok) { clip = await res.json(); clipsCache.push(clip); }
+    } catch (e) { /* ignora */ }
+  }
   if (!clip) return;
   document.getElementById('editClipId').value = clip.id;
   setText('editClipModalTitle', `Editar clipe #${clip.id}`);
@@ -611,27 +619,31 @@ async function loadCalendar() {
         </div>
         <div class="cal-slots">
           ${day.slots.map((s) => {
-            const stLabel = s.status === 'scheduled_on_youtube' ? 'NO YOUTUBE'
+            const stLabel = s.is_simulated ? 'SIMULADO'
+              : s.status === 'scheduled_on_youtube' ? 'NO YOUTUBE'
               : s.status === 'awaiting_oauth' ? 'SEM OAUTH'
               : s.status === 'pending' ? 'AGENDADO'
               : s.status === 'failed' ? 'ERRO'
               : 'VAGO';
+            const movable = s.is_filled && (EDITABLE_POST_STATUSES.includes(s.status) || s.is_simulated);
             const stCls = s.status === 'scheduled_on_youtube' ? 'badge-ok'
               : s.status === 'awaiting_oauth' ? 'badge-warn'
               : s.status === 'failed' ? 'badge-err'
               : s.is_filled ? 'badge-info' : '';
 
             return `
-              <div class="cal-slot ${s.is_filled ? 'filled' : ''}">
+              <div class="cal-slot ${s.is_filled ? 'filled' : ''} ${movable ? 'draggable' : ''}" data-slot-dt="${esc(s.datetime)}"
+                   ${s.is_filled ? `data-post-id="${Number(s.post_id)}" onclick="openEditPostModal(${Number(s.post_id)})" title="Clique para editar${movable ? ', arraste para mover' : ''}"` : ''}
+                   ${movable ? 'data-draggable="true"' : ''}>
                 <div class="cal-slot-top">
-                  <span>${esc(s.time)}</span>
+                  <span>${esc(s.is_filled && s.scheduled_for ? s.scheduled_for.slice(11, 16) : s.time)}</span>
                   <span class="badge ${stCls}" style="font-size:9.5px; padding:1px 5px;">${stLabel}</span>
                 </div>
                 ${s.is_filled && s.clip ? `
                   <div class="cal-slot-title" title="${esc(s.clip.title)}">${esc(s.clip.title)}</div>
                   <div class="cal-slot-foot">
                     <span>${esc(s.clip.duration)}s · S${esc(s.clip.score)}</span>
-                    <button class="btn btn-ghost btn-sm" style="height:20px; padding:0 5px; font-size:10.5px;" onclick="removeScheduledPost(${s.post_id})">Remover</button>
+                    <button class="btn btn-ghost btn-sm" style="height:20px; padding:0 5px; font-size:10.5px;" onclick="event.stopPropagation(); removeScheduledPost(${Number(s.post_id)})">Remover</button>
                   </div>
                 ` : '<div style="font-size:11px; color:var(--text-muted);">Horário disponível</div>'}
               </div>
@@ -640,6 +652,8 @@ async function loadCalendar() {
         </div>
       </div>
     `).join('');
+    calendarDestChannels = destChannels;
+    wireCalendarDragDrop();
   } catch (e) {
     console.error(e);
   }
@@ -1010,6 +1024,8 @@ async function loadChannels() {
     const container = document.getElementById('channelsList');
     if (!container) return;
 
+    renderPriorityList(channels);
+    sourceChannelsCache = channels;
     container.innerHTML = channels.map((c) => `
       <article class="channel-card ${c.is_active ? '' : 'paused'}">
         <div class="channel-card-head">
@@ -1024,11 +1040,11 @@ async function loadChannels() {
         </div>
         <div class="channel-card-foot">
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button class="btn btn-sm" onclick="backfillSingleChannel(${c.id}, '${esc(c.name)}')">+80 vídeos</button>
+            <button class="btn btn-sm" onclick="backfillSingleChannel(${Number(c.id)})">+80 vídeos</button>
             <button class="btn btn-sm" onclick="toggleSourceChannel(${c.id})">${c.is_active ? 'Pausar' : 'Ativar'}</button>
             <a class="btn btn-ghost btn-sm" href="${esc(c.url)}" target="_blank" rel="noopener">Abrir</a>
           </div>
-          <button class="btn btn-danger btn-sm" onclick="deleteSourceChannel(${c.id}, '${esc(c.name)}')">Remover</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteSourceChannel(${Number(c.id)})">Remover</button>
         </div>
       </article>
     `).join('');
@@ -1053,6 +1069,7 @@ async function triggerDeepBackfill(overrideLimit) {
 }
 
 async function backfillSingleChannel(id, name) {
+  name = name || (sourceChannelsCache.find((c) => c.id === id) || {}).name || `#${id}`;
   showToast(`Puxando +80 vídeos históricos de ${name}...`, 'info');
   try {
     const res = await fetch(`/api/channels/${id}/backfill?limit=80&include_streams=true`, { method: 'POST' });
@@ -1125,6 +1142,7 @@ async function toggleSourceChannel(id) {
 }
 
 async function deleteSourceChannel(id, name) {
+  name = name || (sourceChannelsCache.find((c) => c.id === id) || {}).name || `#${id}`;
   if (!confirm(`Remover o canal '${name}' e parar de monitorá-lo?`)) return;
   try {
     const res = await fetch(`/api/channels/${id}`, { method: 'DELETE' });
@@ -1284,3 +1302,303 @@ document.addEventListener('DOMContentLoaded', () => {
   loadClips();
   startRealtimeStream();
 });
+
+/* ==========================================
+   ARRASTAR E SOLTAR (Pointer Events: mouse e toque)
+   Ranks de streamers e de clipes + mover agendados entre horários, dias e canais.
+   No toque, arraste pela alça (⋮⋮) dos ranks para a página continuar rolando.
+   ========================================== */
+
+const EDITABLE_POST_STATUSES = ['pending', 'failed', 'awaiting_oauth'];
+let sourceChannelsCache = [];
+let calendarDestChannels = [];
+let dndActive = false;
+let suppressNextClick = false;
+
+document.addEventListener('click', (e) => {
+  if (suppressNextClick) { e.stopPropagation(); e.preventDefault(); }
+}, true);
+
+function startPointerDrag(el, ev, { onMove, onDrop, onStart, onEnd } = {}) {
+  const startX = ev.clientX;
+  const startY = ev.clientY;
+  const rect = el.getBoundingClientRect();
+  const pid = ev.pointerId;
+  let ghost = null;
+  let active = false;
+
+  const begin = () => {
+    active = true;
+    dndActive = true;
+    ghost = el.cloneNode(true);
+    ghost.removeAttribute('id');
+    ghost.classList.add('drag-ghost');
+    Object.assign(ghost.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px` });
+    document.body.appendChild(ghost);
+    el.classList.add('is-drag-source');
+    document.body.classList.add('is-dragging');
+    if (onStart) onStart();
+  };
+  const move = (e) => {
+    if (e.pointerId !== pid) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!active) {
+      if (Math.hypot(dx, dy) < 6) return;
+      begin();
+    }
+    e.preventDefault();
+    ghost.style.left = `${rect.left + dx}px`;
+    ghost.style.top = `${rect.top + dy}px`;
+    if (onMove) onMove(e.clientX, e.clientY);
+  };
+  const up = (e) => {
+    if (e.pointerId !== pid) return;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    if (!active) return;
+    ghost.remove();
+    el.classList.remove('is-drag-source');
+    document.body.classList.remove('is-dragging');
+    dndActive = false;
+    suppressNextClick = true;
+    setTimeout(() => { suppressNextClick = false; }, 60);
+    if (e.type === 'pointerup' && onDrop) onDrop(e.clientX, e.clientY);
+    if (onEnd) onEnd();
+  };
+  window.addEventListener('pointermove', move, { passive: false });
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+}
+
+function makeSortable(list, onOrderChanged) {
+  list.querySelectorAll('.rank-item').forEach((li) => {
+    li.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0 || ev.target.closest('button, a, input, select')) return;
+      if (ev.pointerType !== 'mouse' && !ev.target.closest('.drag-handle')) return;
+      const before = sortableOrder(list).join(',');
+      startPointerDrag(li, ev, {
+        onMove: (x, y) => {
+          const over = document.elementFromPoint(x, y)?.closest('.rank-item');
+          if (!over || over === li || over.parentElement !== list) return;
+          const r = over.getBoundingClientRect();
+          list.insertBefore(li, y > r.top + r.height / 2 ? over.nextSibling : over);
+        },
+        onDrop: () => {
+          if (sortableOrder(list).join(',') !== before) onOrderChanged(sortableOrder(list));
+        },
+      });
+    });
+  });
+}
+
+function sortableOrder(list) {
+  return Array.from(list.querySelectorAll('.rank-item')).map((li) => Number(li.dataset.itemId));
+}
+
+function rankPos(idx) {
+  return `<span class="rank-pos ${idx === 0 ? 'top1' : idx < 3 ? 'top3' : ''}">${idx + 1}</span>`;
+}
+const DRAG_HANDLE = '<span class="drag-handle" title="Arraste para reordenar" aria-hidden="true">⋮⋮</span>';
+
+async function saveOrder(url, order, statusId, okMsg, reload) {
+  const status = document.getElementById(statusId);
+  if (status) status.textContent = 'Salvando...';
+  try {
+    const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Não foi possível salvar a ordem.', 'error');
+      if (status) status.textContent = '';
+    } else {
+      if (status) status.textContent = 'Salvo';
+      showToast(okMsg, 'success');
+    }
+  } catch (e) {
+    showToast('Erro de rede ao salvar a ordem.', 'error');
+    if (status) status.textContent = '';
+  }
+  reload();
+}
+
+// ---- Rank de prioridade dos streamers ----
+function renderPriorityList(channels) {
+  const list = document.getElementById('priorityList');
+  if (!list) return;
+  if (!channels.length) {
+    list.innerHTML = '<li class="rank-empty">Nenhum canal monitorado ainda.</li>';
+    return;
+  }
+  list.innerHTML = channels.map((c, idx) => `
+    <li class="rank-item priority-item" data-item-id="${Number(c.id)}">
+      ${rankPos(idx)}
+      ${DRAG_HANDLE}
+      <span class="rank-name">${esc(c.name)} <span class="rank-meta">${esc(c.handle)}</span></span>
+      <span class="rank-meta hide-mobile">${esc(c.video_count)} vídeos${c.is_active ? '' : ' · pausado'}</span>
+    </li>
+  `).join('');
+  makeSortable(list, (order) => saveOrder('/api/channels/priority', order, 'priorityStatus', 'Rank de prioridade salvo!', loadChannels));
+}
+
+// ---- Fila de postagem (rank de clipes) ----
+async function loadClipQueue() {
+  const list = document.getElementById('clipQueueList');
+  if (!list) return;
+  try {
+    const queue = await (await fetch('/api/clips/queue')).json();
+    if (!queue.length) {
+      list.innerHTML = '<li class="rank-empty">Nenhum clipe na fila. Clipes aguardando render ou prontos (ainda não agendados) aparecem aqui.</li>';
+      return;
+    }
+    list.innerHTML = queue.map((c, idx) => `
+      <li class="rank-item queue-item" data-item-id="${Number(c.id)}">
+        ${rankPos(idx)}
+        ${DRAG_HANDLE}
+        <span class="rank-name">${esc(c.title)}</span>
+        <span class="rank-meta hide-mobile">${esc(c.channel_name || '')}</span>
+        <span class="badge ${c.is_ready ? 'badge-ok' : ''}">${c.is_ready ? 'pronto' : 'a renderizar'}</span>
+        <span class="rank-meta hide-mobile">S${esc(c.score)}</span>
+      </li>
+    `).join('');
+    makeSortable(list, (order) => saveOrder('/api/clips/queue', order, 'queueStatus', 'Ordem da fila salva!', loadClipQueue));
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// ---- Agenda: arrastar entre horários, dias e canais ----
+function wireCalendarDragDrop() {
+  const grid = document.getElementById('calendarGrid');
+  const zone = document.getElementById('channelDropZone');
+  const chips = document.getElementById('channelDropChips');
+  const sel = document.getElementById('calendarChannelSelect');
+  if (!grid || !zone || !chips) return;
+  const now = new Date();
+  const current = sel ? Number(sel.value) : null;
+  chips.innerHTML = calendarDestChannels.filter((ch) => ch.id !== current).map((ch) => `
+    <span class="channel-chip" data-drop-channel="${Number(ch.id)}">${esc(ch.name)}</span>
+  `).join('') || '<span class="rank-meta">(nenhum outro canal cadastrado)</span>';
+
+  const isFuture = (slot) => new Date(slot.dataset.slotDt) > now;
+  const findTarget = (x, y) => {
+    const el = document.elementFromPoint(x, y);
+    if (!el) return null;
+    const chip = el.closest('.channel-chip');
+    if (chip) return chip;
+    const slot = el.closest('#calendarGrid .cal-slot');
+    return slot && isFuture(slot) ? slot : null;
+  };
+
+  grid.querySelectorAll('.cal-slot').forEach((slot) => {
+    if (!isFuture(slot)) slot.classList.add('past');
+    if (slot.dataset.draggable !== 'true') return;
+    slot.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0 || ev.target.closest('button')) return;
+      const postId = Number(slot.dataset.postId);
+      let over = null;
+      startPointerDrag(slot, ev, {
+        onStart: () => zone.classList.add('show'),
+        onMove: (x, y) => {
+          const t = findTarget(x, y);
+          const next = t && t !== slot ? t : null;
+          if (next === over) return;
+          if (over) over.classList.remove('drop-target');
+          over = next;
+          if (over) over.classList.add('drop-target');
+        },
+        onDrop: (x, y) => {
+          const t = findTarget(x, y);
+          if (!t || t === slot) return;
+          if (t.dataset.dropChannel) moveScheduledPost(postId, { destination_channel_id: Number(t.dataset.dropChannel) });
+          else moveScheduledPost(postId, { scheduled_for: t.dataset.slotDt });
+        },
+        onEnd: () => {
+          if (over) over.classList.remove('drop-target');
+          zone.classList.remove('show');
+        },
+      });
+    });
+  });
+}
+
+async function moveScheduledPost(postId, body) {
+  try {
+    const res = await fetch(`/api/scheduled-posts/${postId}/move`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Não foi possível mover o agendamento.', 'error');
+    } else {
+      const when = (data.scheduled_for || '').replace('T', ' ').slice(0, 16);
+      showToast(data.swapped_with
+        ? `Trocado de lugar com o agendamento #${data.swapped_with}.`
+        : `Movido para ${when} em ${data.destination_channel_name}.`, 'success');
+    }
+  } catch (e) {
+    showToast('Erro de rede ao mover o agendamento.', 'error');
+  }
+  loadCalendar();
+  fetchStatus();
+}
+
+// ---- Editor de agendamento (clique no horário) ----
+async function openEditPostModal(postId) {
+  try {
+    const res = await fetch(`/api/scheduled-posts/${postId}`);
+    const p = await res.json();
+    if (!res.ok) { showToast(p.detail || 'Agendamento não encontrado.', 'error'); return; }
+    if (!calendarDestChannels.length) calendarDestChannels = await (await fetch('/api/destination-channels')).json();
+    document.getElementById('editPostId').value = p.id;
+    document.getElementById('editPostClipId').value = p.clip_id;
+    document.getElementById('editPostModalTitle').textContent = `Agendamento #${p.id}`;
+    document.getElementById('editPostClipTitle').textContent = p.clip_title || `Clipe #${p.clip_id}`;
+    const statusTxt = p.is_simulated ? 'simulado (canal sem token OAuth: nada foi enviado ao YouTube)'
+      : p.status === 'awaiting_oauth' ? 'aguardando conectar o canal (OAuth)' : p.status;
+    document.getElementById('editPostStatus').textContent = p.editable
+      ? `Status: ${statusTxt}`
+      : 'Este vídeo já foi enviado ao YouTube. Altere ou remova pelo YouTube Studio.';
+    const when = document.getElementById('editPostWhen');
+    when.value = (p.scheduled_for || '').slice(0, 16);
+    const chSel = document.getElementById('editPostChannel');
+    chSel.innerHTML = calendarDestChannels.map((ch) => `<option value="${Number(ch.id)}">${esc(ch.name)}${ch.has_token ? '' : ' (sem token)'}</option>`).join('');
+    chSel.value = String(p.destination_channel_id);
+    [when, chSel].forEach((el) => { el.disabled = !p.editable; });
+    document.getElementById('editPostSaveBtn').style.display = p.editable ? '' : 'none';
+    document.getElementById('editPostRemoveBtn').style.display = p.editable ? '' : 'none';
+    setPostModalError('');
+    openModal('editPostModal');
+  } catch (e) {
+    showToast('Erro ao abrir agendamento.', 'error');
+  }
+}
+
+function setPostModalError(msg) {
+  const el = document.getElementById('editPostError');
+  el.textContent = msg || '';
+  el.style.display = msg ? '' : 'none';
+}
+
+async function saveScheduledPost() {
+  const postId = Number(document.getElementById('editPostId').value);
+  const body = {
+    scheduled_for: document.getElementById('editPostWhen').value,
+    destination_channel_id: Number(document.getElementById('editPostChannel').value),
+  };
+  const res = await fetch(`/api/scheduled-posts/${postId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) { setPostModalError(data.detail || 'Erro ao salvar.'); return; }
+  closeModal('editPostModal');
+  showToast('Agendamento atualizado!', 'success');
+  loadCalendar();
+  fetchStatus();
+}
+
+async function removeScheduledPostFromModal() {
+  const postId = Number(document.getElementById('editPostId').value);
+  closeModal('editPostModal');
+  await removeScheduledPost(postId);
+}

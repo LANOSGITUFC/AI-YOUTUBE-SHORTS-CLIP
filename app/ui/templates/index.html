@@ -174,6 +174,16 @@
               <button class="pill-btn" data-clip-filter="scheduled" onclick="setClipFilter('scheduled', this)">Agendados</button>
             </div>
           </div>
+          <div class="panel rank-panel">
+            <div class="rank-panel-head">
+              <div>
+                <h3 class="rank-title">Fila de postagem (rank de clipes)</h3>
+                <p class="section-desc">Arraste e solte para reordenar. O 1º é renderizado e agendado primeiro; clipes novos entram no fim. Salva sozinho.</p>
+              </div>
+              <span id="queueStatus" class="rank-status"></span>
+            </div>
+            <ol id="clipQueueList" class="rank-list"></ol>
+          </div>
           <div id="clipsGrid" class="clips-grid"></div>
         </section>
 
@@ -242,7 +252,12 @@
               <button class="btn btn-primary btn-sm" onclick="autoFillSchedule()">Auto-preencher grade</button>
             </div>
           </div>
+          <p class="section-desc cal-dnd-hint">Arraste um vídeo para outro horário ou dia (se estiver ocupado, os dois trocam de lugar), ou solte sobre outro canal. Clique para editar.</p>
           <div id="calendarGrid" class="calendar-grid"></div>
+          <div id="channelDropZone" class="channel-drop-zone">
+            <span>Soltar em outro canal (mesmo horário):</span>
+            <div id="channelDropChips" class="channel-drop-chips"></div>
+          </div>
         </section>
 
         <!-- VIEW 4: INSPETOR DE LINHA DO TEMPO (DEDUPLICAÇÃO) -->
@@ -418,6 +433,16 @@
               <button class="btn btn-sm" onclick="triggerCheckChannels()">Varrer RSS</button>
               <button class="btn btn-primary btn-sm" onclick="openAddChannelModal()">+ Adicionar canais</button>
             </div>
+          </div>
+          <div class="panel rank-panel">
+            <div class="rank-panel-head">
+              <div>
+                <h3 class="rank-title">Rank de prioridade de vídeos</h3>
+                <p class="section-desc">Arraste e solte para reordenar. O 1º lugar tem mais vídeos baixados, cortados e postados; o último, menos. Salva sozinho.</p>
+              </div>
+              <span id="priorityStatus" class="rank-status"></span>
+            </div>
+            <ol id="priorityList" class="rank-list"></ol>
           </div>
           <div id="channelsList" class="cards-grid-3"></div>
         </section>
@@ -602,6 +627,36 @@
         <button class="btn btn-sm" onclick="closeModal('editClipModal')">Cancelar</button>
         <button class="btn btn-sm" onclick="saveClipEdits(false)">Salvar</button>
         <button class="btn btn-primary btn-sm" onclick="saveClipEdits(true)">Salvar e renderizar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: EDITAR AGENDAMENTO -->
+  <div class="modal-backdrop" id="editPostModal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="editPostModalTitle">Editar agendamento</h3>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('editPostModal')">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editPostId">
+        <input type="hidden" id="editPostClipId">
+        <p id="editPostClipTitle" style="font-weight:600;"></p>
+        <p id="editPostStatus" class="section-desc"></p>
+        <div class="field">
+          <label for="editPostWhen">Data e hora (horário local)</label>
+          <input id="editPostWhen" type="datetime-local" class="input input-mono">
+        </div>
+        <div class="field">
+          <label for="editPostChannel">Canal de destino</label>
+          <select id="editPostChannel" class="select"></select>
+        </div>
+        <p id="editPostError" class="form-error" style="display:none;"></p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-danger btn-sm" id="editPostRemoveBtn" onclick="removeScheduledPostFromModal()" style="margin-right:auto;">Remover da agenda</button>
+        <button class="btn btn-sm" onclick="closeModal('editPostModal'); openEditClipModal(Number(document.getElementById('editPostClipId').value))">Editar clipe</button>
+        <button class="btn btn-primary btn-sm" id="editPostSaveBtn" onclick="saveScheduledPost()">Salvar</button>
       </div>
     </div>
   </div>

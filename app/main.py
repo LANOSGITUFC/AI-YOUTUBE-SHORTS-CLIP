@@ -29,6 +29,7 @@ from app.services.downloader import VideoDownloader, extract_youtube_video_id, C
 from app.services.editor import VideoEditor
 from app.services.subtitles import OPUS_CAPTION_PRESETS
 from app.services.scheduler import PostScheduler
+from app.services.priority import ranked_channels
 from app.services.pipeline_worker import PipelineWorker
 from app.services.auth_youtube import YouTubeAuthManager, get_client_secrets_path
 
@@ -198,7 +199,7 @@ def run_pipeline_cycle(background_tasks: BackgroundTasks):
 
 @app.get("/api/channels")
 def list_monitored_channels(db: Session = Depends(get_db)):
-    channels = db.query(SourceChannel).order_by(SourceChannel.id.asc()).all()
+    channels = ranked_channels(db)  # ordem do rank de prioridade (arrastar e soltar no painel)
     out = []
     for ch in channels:
         video_count = db.query(SourceVideo).filter(SourceVideo.channel_id == ch.channel_id).count()
@@ -209,10 +210,32 @@ def list_monitored_channels(db: Session = Depends(get_db)):
             "channel_id": ch.channel_id,
             "url": ch.url,
             "is_active": bool(ch.is_active),
+            "priority_rank": ch.priority_rank or 0,
             "video_count": video_count,
             "last_checked": ch.last_checked_at.isoformat() if ch.last_checked_at else None,
         })
     return out
+
+
+@app.put("/api/channels/priority")
+def update_channels_priority(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    """Recebe a ordem do rank (IDs do mais prioritário ao menos) e grava 1..N. Precisa conter todos os canais."""
+    order = payload.get("order")
+    if not isinstance(order, list) or not order:
+        raise HTTPException(status_code=400, detail="Envie 'order' com a lista de IDs dos canais, do 1º ao último.")
+    try:
+        ids = [int(x) for x in order]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Os IDs do rank devem ser números inteiros.")
+    if len(set(ids)) != len(ids):
+        raise HTTPException(status_code=400, detail="O rank tem canais repetidos.")
+    channels = {c.id: c for c in db.query(SourceChannel).all()}
+    if set(ids) != set(channels.keys()):
+        raise HTTPException(status_code=409, detail="A lista de canais mudou. Recarregue e tente de novo.")
+    for rank, cid in enumerate(ids, start=1):
+        channels[cid].priority_rank = rank
+    db.commit()
+    return {"success": True, "order": ids}
 
 
 def _run_channel_backfill_task(channel_db_id: int, limit: int = 50, include_streams: bool = True):
@@ -628,6 +651,7 @@ def _serialize_clip(c: ClipSegment, include_words: bool = False) -> Dict[str, An
         "crop_mode": c.crop_mode or "split_screen",
         "editor_config": _parse_editor_config(c.editor_config_json),
         "status": c.status,
+        "queue_rank": c.queue_rank,
         "is_ready": is_ready,
         "file_size_mb": round(os.path.getsize(c.clip_path) / (1024 * 1024), 2) if is_ready else 0.0,
         "suggested_by": c.suggested_by,
@@ -667,6 +691,54 @@ def list_clips(
         q = q.filter(ClipSegment.status == status)
     clips = q.order_by(ClipSegment.id.desc()).all()
     return [_serialize_clip(c, include_words=False) for c in clips]
+
+
+QUEUE_STATUSES = ("analyzed", "rendered")
+
+
+def _queue_clips(db: Session):
+    clips = db.query(ClipSegment).filter(ClipSegment.status.in_(QUEUE_STATUSES)).all()
+    return sorted(clips, key=lambda c: (c.queue_rank is None, c.queue_rank or 0, -(c.virality_score or 0), c.id))
+
+
+@app.get("/api/clips/queue")
+def get_clip_queue(db: Session = Depends(get_db)):
+    """Fila de postagem: clipes ainda não agendados, na ordem em que serão renderizados/agendados."""
+    return [
+        {
+            "position": pos,
+            "id": c.id,
+            "title": c.title,
+            "score": c.virality_score,
+            "duration": round(float(c.duration or 0), 1),
+            "status": c.status,
+            "is_ready": _is_valid_mp4(c.clip_path),
+            "queue_rank": c.queue_rank,
+            "channel_name": c.video.channel.name if (c.video and c.video.channel) else None,
+        }
+        for pos, c in enumerate(_queue_clips(db), start=1)
+    ]
+
+
+@app.put("/api/clips/queue")
+def update_clip_queue(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    """Recebe a ordem da fila (IDs do primeiro ao último) e grava as posições 1..N."""
+    order = payload.get("order")
+    if not isinstance(order, list) or not order:
+        raise HTTPException(status_code=400, detail="Envie 'order' com os IDs dos clipes, do primeiro ao último.")
+    try:
+        ids = [int(x) for x in order]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Os IDs da fila devem ser números inteiros.")
+    if len(set(ids)) != len(ids):
+        raise HTTPException(status_code=400, detail="A fila tem clipes repetidos.")
+    queue = {c.id: c for c in _queue_clips(db)}
+    if set(ids) != set(queue.keys()):
+        raise HTTPException(status_code=409, detail="A fila mudou (clipes novos ou agendados). Recarregue e tente de novo.")
+    for rank, cid in enumerate(ids, start=1):
+        queue[cid].queue_rank = rank
+    db.commit()
+    return {"success": True, "order": ids}
 
 
 @app.get("/api/clips/{clip_id}")
@@ -1015,7 +1087,10 @@ def get_scheduler_matrix(channel_id: Optional[int] = None, db: Session = Depends
         if not dest:
             return {"error": "Nenhum canal de destino cadastrado"}
         channel_id = dest.id
-    return scheduler.get_calendar_matrix(channel_id, days=7)
+    result = scheduler.get_calendar_matrix(channel_id, days=7)
+    if isinstance(result, dict) and result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
 
 
 @app.post("/api/scheduler/auto-fill")
@@ -1023,6 +1098,155 @@ def auto_fill_schedule(db: Session = Depends(get_db)):
     scheduler = PostScheduler(db)
     count = scheduler.auto_schedule_all_rendered(force=True)
     return {"scheduled": count, "message": f"{count} novos clipes renderizados agendados na grade semanal."}
+
+
+# ---------- Editar / arrastar agendados ----------
+EDITABLE_POST_STATUSES = ("pending", "failed", "awaiting_oauth")
+OCCUPYING_POST_STATUSES = ("pending", "failed", "awaiting_oauth", "scheduled_on_youtube", "published")
+
+
+def _is_simulated_post(post: ScheduledPost) -> bool:
+    return bool(post.youtube_video_id and post.youtube_video_id.startswith("yt_sim_"))
+
+
+def _post_is_editable(post: ScheduledPost) -> bool:
+    return post.status in EDITABLE_POST_STATUSES or _is_simulated_post(post)
+
+
+def _ensure_post_editable(post: ScheduledPost) -> None:
+    if _post_is_editable(post):
+        return
+    if post.status in ("scheduled_on_youtube", "published"):
+        raise HTTPException(status_code=409, detail="Este vídeo já foi enviado ao YouTube. Altere ou remova pelo YouTube Studio.")
+    raise HTTPException(status_code=409, detail=f"Agendamento com status '{post.status}' não pode ser alterado.")
+
+
+def _serialize_post(post: ScheduledPost) -> Dict[str, Any]:
+    clip = post.clip
+    return {
+        "id": post.id,
+        "clip_id": post.clip_id,
+        "clip_title": clip.title if clip else None,
+        "destination_channel_id": post.destination_channel_id,
+        "destination_channel_name": post.destination_channel.name if post.destination_channel else None,
+        "scheduled_for": post.scheduled_for.isoformat() if post.scheduled_for else None,
+        "status": post.status,
+        "is_simulated": _is_simulated_post(post),
+        "youtube_url": post.youtube_url,
+        "error_log": post.error_log,
+        "editable": _post_is_editable(post),
+    }
+
+
+def _parse_local_datetime(raw: Any):
+    import datetime as _dt
+    raw = str(raw or "").strip()
+    try:
+        value = _dt.datetime.fromisoformat(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Data/hora inválida. Use o formato AAAA-MM-DDTHH:MM.")
+    if value.tzinfo is not None:
+        value = value.astimezone().replace(tzinfo=None)  # a grade grava hora local, sem fuso
+    if value <= _dt.datetime.now():
+        raise HTTPException(status_code=400, detail="Escolha um horário no futuro.")
+    return value
+
+
+def _parse_destination(db: Session, raw: Any) -> int:
+    try:
+        dest_id = int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="destination_channel_id inválido.")
+    if not db.query(DestinationChannel).filter(DestinationChannel.id == dest_id).first():
+        raise HTTPException(status_code=404, detail="Canal de destino não encontrado.")
+    return dest_id
+
+
+def _requeue_post(post: ScheduledPost) -> None:
+    """Depois de mover/editar, o post volta para a fila de upload com o novo horário/canal."""
+    if _is_simulated_post(post) or post.status == "failed":
+        post.status = "pending"
+        post.youtube_video_id = None
+        post.youtube_url = None
+        post.published_at = None
+        post.error_log = None
+
+
+@app.get("/api/scheduled-posts")
+def list_scheduled_posts(db: Session = Depends(get_db)):
+    posts = db.query(ScheduledPost).filter(ScheduledPost.status != "cancelled").order_by(ScheduledPost.scheduled_for.asc()).all()
+    return [_serialize_post(p) for p in posts]
+
+
+@app.get("/api/scheduled-posts/{post_id}")
+def get_scheduled_post(post_id: int, db: Session = Depends(get_db)):
+    post = db.query(ScheduledPost).filter(ScheduledPost.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado.")
+    return _serialize_post(post)
+
+
+@app.patch("/api/scheduled-posts/{post_id}")
+def update_scheduled_post(post_id: int, payload: Dict[str, Any], db: Session = Depends(get_db)):
+    """Muda data/hora e/ou canal de destino de um agendamento."""
+    post = db.query(ScheduledPost).filter(ScheduledPost.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado.")
+    _ensure_post_editable(post)
+    if "scheduled_for" in payload:
+        post.scheduled_for = _parse_local_datetime(payload.get("scheduled_for"))
+    if "destination_channel_id" in payload:
+        post.destination_channel_id = _parse_destination(db, payload.get("destination_channel_id"))
+    _requeue_post(post)
+    db.commit()
+    db.refresh(post)
+    return _serialize_post(post)
+
+
+@app.post("/api/scheduled-posts/{post_id}/move")
+def move_scheduled_post(post_id: int, payload: Dict[str, Any], db: Session = Depends(get_db)):
+    """
+    Arrastar e soltar na agenda: move o post para outro horário/dia e/ou outro canal.
+    Se o destino já tiver um agendamento (mesmo canal, até 30 min de diferença), os dois trocam de lugar.
+    """
+    import datetime as _dt
+    post = db.query(ScheduledPost).filter(ScheduledPost.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado.")
+    _ensure_post_editable(post)
+    target_dt = _parse_local_datetime(payload["scheduled_for"]) if payload.get("scheduled_for") else post.scheduled_for
+    if target_dt <= _dt.datetime.now():
+        raise HTTPException(status_code=400, detail="Não dá para mover para um horário que já passou.")
+    target_channel = (
+        _parse_destination(db, payload["destination_channel_id"])
+        if payload.get("destination_channel_id") not in (None, "")
+        else post.destination_channel_id
+    )
+    occupant = (
+        db.query(ScheduledPost)
+        .filter(ScheduledPost.id != post.id)
+        .filter(ScheduledPost.destination_channel_id == target_channel)
+        .filter(ScheduledPost.scheduled_for >= target_dt - _dt.timedelta(minutes=30))
+        .filter(ScheduledPost.scheduled_for <= target_dt + _dt.timedelta(minutes=30))
+        .filter(ScheduledPost.status.in_(OCCUPYING_POST_STATUSES))
+        .first()
+    )
+    swapped_with = None
+    if occupant:
+        _ensure_post_editable(occupant)
+        if post.scheduled_for <= _dt.datetime.now():
+            raise HTTPException(status_code=400, detail="O horário de origem já passou; não dá para trocar.")
+        occupant.scheduled_for, occupant.destination_channel_id = post.scheduled_for, post.destination_channel_id
+        _requeue_post(occupant)
+        swapped_with = occupant.id
+    post.scheduled_for = target_dt
+    post.destination_channel_id = target_channel
+    _requeue_post(post)
+    db.commit()
+    db.refresh(post)
+    result = _serialize_post(post)
+    result["swapped_with"] = swapped_with
+    return result
 
 
 @app.delete("/api/scheduler/posts/{post_id}")
@@ -1270,8 +1494,15 @@ def get_ai_bus_events(db: Session = Depends(get_db)):
 
 @app.get("/api/events/stream")
 async def stream_realtime_events():
+    """
+    Cada conexão dura no máximo ~25s; o navegador (EventSource) reconecta sozinho.
+    Assim o servidor nunca fica preso esperando esta conexão fechar ao reiniciar (git pull / reload).
+    """
     async def event_generator():
-        while True:
+        yield "retry: 2000\n\n"
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + 25
+        while loop.time() < deadline:
             try:
                 with SessionLocal() as db:
                     status_data = get_system_status(db)

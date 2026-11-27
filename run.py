@@ -23,6 +23,8 @@ def main():
         port=port,
         reload=True,
         reload_dirs=["app"],
+        # Não espera conexões abertas (ex: painel com stream em tempo real) para reiniciar
+        timeout_graceful_shutdown=3,
     )
 
 if __name__ == "__main__":
