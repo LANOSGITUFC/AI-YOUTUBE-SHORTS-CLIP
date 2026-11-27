@@ -18,8 +18,6 @@ import glob
 TOKENS_DIR = "./data/tokens"
 
 SCOPES = [
-    "https://www.googleapis.com/auth/youtube.upload",
-    "https://www.googleapis.com/auth/youtube.readonly",
     "https://www.googleapis.com/auth/youtube.force-ssl"
 ]
 
@@ -62,8 +60,8 @@ class YouTubeAuthManager:
         )
         auth_url, _ = flow.authorization_url(
             access_type="offline", # Garante emissão de refresh_token permanente
-            include_granted_scopes="true",
-            prompt="consent", # Força tela de consentimento para nunca perder o refresh token
+            include_granted_scopes="false", # NUNCA misturar com escopos antigos de outros apps (ex: Drive)
+            prompt="consent", # Força tela de consentimento para emissão do refresh token
             state=state
         )
         return auth_url
@@ -89,20 +87,23 @@ class YouTubeAuthManager:
         flow.fetch_token(code=code)
         creds = flow.credentials
 
-        # Consulta informações do canal conectado via API
-        youtube = build("youtube", "v3", credentials=creds)
-        ch_resp = youtube.channels().list(part="snippet,contentDetails,statistics", mine=True).execute()
-
         yt_channel_id = ""
         yt_channel_title = channel_name
         avatar_url = ""
 
-        if ch_resp.get("items"):
-            item = ch_resp["items"][0]
-            yt_channel_id = item.get("id", "")
-            snippet = item.get("snippet", {})
-            yt_channel_title = snippet.get("title", channel_name)
-            avatar_url = snippet.get("thumbnails", {}).get("default", {}).get("url", "")
+        # Consulta informações do canal conectado via API de forma segura
+        try:
+            youtube = build("youtube", "v3", credentials=creds)
+            ch_resp = youtube.channels().list(part="snippet,contentDetails,statistics", mine=True).execute()
+
+            if ch_resp.get("items"):
+                item = ch_resp["items"][0]
+                yt_channel_id = item.get("id", "")
+                snippet = item.get("snippet", {})
+                yt_channel_title = snippet.get("title", channel_name)
+                avatar_url = snippet.get("thumbnails", {}).get("default", {}).get("url", "")
+        except Exception:
+            pass
 
         # Salva arquivo de token isolado
         token_filename = f"token_{yt_channel_id or int(os.urandom(4).hex(), 16)}.json"
