@@ -90,6 +90,10 @@ def init_db():
             if dest_cols and "weight" not in dest_cols:
                 conn.execute(text("ALTER TABLE destination_channels ADD COLUMN weight INTEGER NOT NULL DEFAULT 100"))
 
+            src_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(source_channels)")).fetchall()]
+            if src_cols and "priority_rank" not in src_cols:
+                conn.execute(text("ALTER TABLE source_channels ADD COLUMN priority_rank INTEGER NOT NULL DEFAULT 0"))
+
             clip_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(clip_segments)")).fetchall()]
             if clip_cols:
                 migrations = [
@@ -98,6 +102,7 @@ def init_db():
                     ("story_score", "INTEGER DEFAULT 86"),
                     ("liked", "BOOLEAN DEFAULT 0"),
                     ("editor_config_json", "TEXT"),
+                    ("queue_rank", "INTEGER"),
                 ]
                 for col_name, col_def in migrations:
                     if col_name not in clip_cols:

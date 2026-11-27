@@ -1268,3 +1268,60 @@ button, input, select, textarea {
   .telemetry-strip { grid-template-columns: repeat(2, 1fr); }
   .split-queue, .preset-layout { grid-template-columns: 1fr; }
 }
+
+
+/* ==========================================
+   ARRASTAR E SOLTAR (ranks e agenda) — mouse e toque
+   ========================================== */
+.rank-panel { margin-bottom: 16px; padding: 14px 16px; }
+.rank-panel-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.rank-title { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+.rank-status { font-size: 11px; color: var(--text-muted); font-family: ui-monospace, monospace; }
+.rank-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rank-empty { font-size: 12px; color: var(--text-muted); padding: 6px 2px; }
+.rank-item {
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+  background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  cursor: grab; user-select: none; transition: border-color .15s, opacity .15s;
+}
+.rank-item:hover { border-color: var(--border-strong); }
+.rank-pos {
+  width: 26px; height: 26px; flex-shrink: 0; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 12px; background: var(--bg-surface); color: var(--text-secondary);
+}
+.rank-pos.top1 { background: var(--warn); color: #111; }
+.rank-pos.top3 { background: var(--warn-soft); color: var(--warn); }
+.drag-handle {
+  width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; color: var(--text-muted); cursor: grab; touch-action: none; font-size: 16px; letter-spacing: -2px;
+}
+.drag-handle:hover { background: var(--bg-surface); color: var(--text-primary); }
+.rank-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
+.rank-meta { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+@media (max-width: 640px) { .rank-meta.hide-mobile { display: none; } }
+.is-drag-source { opacity: .3; }
+.drag-ghost { position: fixed; pointer-events: none; z-index: 1000; opacity: .92; transform: rotate(1deg) scale(1.02); box-shadow: 0 18px 40px rgba(0,0,0,.55); }
+body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select: none !important; }
+.cal-slot.filled.draggable { cursor: grab; touch-action: none; }
+.cal-slot.filled { cursor: pointer; }
+.cal-slot.drop-target { outline: 2px solid var(--warn); outline-offset: 1px; }
+.cal-slot.past { opacity: .55; }
+.cal-dnd-hint { margin: -8px 0 12px; }
+.channel-drop-zone {
+  display: none; position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 900; max-width: 92vw;
+  flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; font-size: 12px;
+  background: var(--bg-elevated); border: 1px solid var(--warn); border-radius: 12px; box-shadow: 0 18px 40px rgba(0,0,0,.5);
+}
+.channel-drop-zone.show { display: flex; }
+.channel-drop-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.channel-chip { padding: 7px 12px; border-radius: 8px; border: 1px dashed var(--border-strong); background: var(--bg-surface); }
+.channel-chip.drop-target { border-color: var(--warn); color: var(--warn); }
+.form-error { color: #f27478; font-size: 12px; font-weight: 600; }
+
+/* Celular: topo quebra em duas linhas e nada passa da largura da tela */
+@media (max-width: 640px) {
+  .topbar { height: auto; flex-wrap: wrap; padding: 10px 14px; gap: 8px; }
+  .quick-import-form { order: 3; flex-basis: 100%; max-width: none; }
+  .quick-import-input { min-width: 0; }
+  .calendar-grid { max-width: 100%; }
+}

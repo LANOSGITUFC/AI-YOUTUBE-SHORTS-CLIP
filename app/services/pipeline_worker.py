@@ -20,6 +20,7 @@ from app.services.editor import VideoEditor
 from app.services.scheduler import PostScheduler
 from app.services.uploader import YouTubeUploader
 from app.database.models import SourceVideo, ClipSegment, ScheduledPost
+from app.services.priority import get_priority_weights, priority_key
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("PipelineWorker")
@@ -179,7 +180,12 @@ class PipelineWorker:
                                 .filter(SourceVideo.status.in_(["downloaded", "transcribing", "transcribed", "processed"]))
                                 .count()
                             )
-                    pending_video = min(discovered_videos, key=lambda v: processed_counts.get(v.channel_id, 0))
+                    # Rank de prioridade do painel: streamer no topo recebe proporcionalmente mais vídeos
+                    weights = get_priority_weights(db)
+                    pending_video = min(
+                        discovered_videos,
+                        key=lambda v: priority_key(weights, v.channel_id, processed_counts.get(v.channel_id, 0)),
+                    )
 
                 if pending_video:
                     self._state["current_video_id"] = pending_video.id
@@ -225,13 +231,15 @@ class PipelineWorker:
                                 .filter(ClipSegment.status.in_(["rendered", "scheduled", "published"]))
                                 .count()
                             )
-                    pending_clip = min(
-                        renderable_clips,
-                        key=lambda c: (
-                            rendered_counts.get(c.video.channel_id if c.video else str(c.video_id), 0),
-                            -(c.virality_score or 0),
-                        ),
-                    )
+                    weights = get_priority_weights(db)
+
+                    def _clip_key(c):
+                        ch_id = c.video.channel_id if c.video else str(c.video_id)
+                        return priority_key(weights, ch_id, rendered_counts.get(ch_id, 0)) + (-(c.virality_score or 0),)
+
+                    ranked = [c for c in renderable_clips if c.queue_rank is not None]
+                    # Fila manual (arrastada no painel) tem prioridade sobre a ordem automática
+                    pending_clip = min(ranked, key=lambda c: c.queue_rank) if ranked else min(renderable_clips, key=_clip_key)
 
                 if pending_clip:
                     self._state["current_clip_id"] = pending_clip.id

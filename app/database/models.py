@@ -20,6 +20,7 @@ class SourceChannel(Base):
     rss_url = Column(String(500), nullable=False)
     is_active = Column(Boolean, default=True)
     check_interval_minutes = Column(Integer, default=30)
+    priority_rank = Column(Integer, default=0, nullable=False) # 1 = topo do rank de prioridade (0 = ainda sem posição, vai pro fim)
     last_checked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=get_utc_now)
 
@@ -78,6 +79,7 @@ class ClipSegment(Base):
     suggested_by = Column(String(50), default="ai_analyzer") # claude_code, open_code, gemini, etc.
     status = Column(String(50), default="analyzed") # analyzed, rendered, scheduled, published, discarded
     
+    queue_rank = Column(Integer, nullable=True) # Posição manual na fila de postagem (1 = primeiro). Nulo = ordem automática
     created_at = Column(DateTime, default=get_utc_now)
 
     video = relationship("SourceVideo", back_populates="clips")

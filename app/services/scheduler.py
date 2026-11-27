@@ -124,6 +124,7 @@ class PostScheduler:
         )
         self.db.add(post)
         clip.status = "scheduled"
+        clip.queue_rank = None
         self.db.commit()
         self.db.refresh(post)
         return post
@@ -151,14 +152,20 @@ class PostScheduler:
         if not unassigned_clips:
             return 0
 
-        # Intercala 1 clipe por streamer por rodada
+        # Clipes com posição manual na fila (arrastados no painel) entram primeiro, nessa ordem
+        manual = sorted([c for c in unassigned_clips if c.queue_rank is not None], key=lambda c: c.queue_rank)
+        unassigned_clips = [c for c in unassigned_clips if c.queue_rank is None]
+
+        # Intercala 1 clipe por streamer por rodada, na ordem do rank de prioridade dos streamers
+        from app.services.priority import get_priority_weights
+        weights = get_priority_weights(self.db)
         by_streamer: Dict[str, deque] = defaultdict(deque)
         for clip in unassigned_clips:
             streamer_key = clip.video.channel_id if clip.video else str(clip.video_id)
             by_streamer[streamer_key].append(clip)
 
-        mixed_clips: List[ClipSegment] = []
-        queues = list(by_streamer.values())
+        mixed_clips: List[ClipSegment] = list(manual)
+        queues = [by_streamer[k] for k in sorted(by_streamer.keys(), key=lambda k: -weights.get(k, 0))]
         while queues:
             next_queues = []
             for q in queues:
@@ -284,6 +291,8 @@ class PostScheduler:
                         "is_filled": True,
                         "post_id": post.id,
                         "status": post.status,
+                        "scheduled_for": post.scheduled_for.isoformat(),
+                        "is_simulated": bool(post.youtube_video_id and post.youtube_video_id.startswith("yt_sim_")),
                         "youtube_url": post.youtube_url,
                         "error_log": post.error_log,
                         "clip": {
