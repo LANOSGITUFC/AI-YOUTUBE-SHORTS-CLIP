@@ -111,7 +111,7 @@ class PostScheduler:
     def auto_schedule_all_rendered(self) -> int:
         """
         Percorre todos os clipes com status 'rendered' e distribui automaticamente
-        nos slots de 4 vídeos/dia dos canais ativos.
+        para o canal ativo que possuir o horário vago mais próximo.
         """
         active_channels = self.db.query(DestinationChannel).filter(DestinationChannel.is_active == True).all()
         if not active_channels:
@@ -125,16 +125,29 @@ class PostScheduler:
         )
 
         scheduled_count = 0
-        channel_index = 0
 
         for clip in unassigned_clips:
-            dest_channel = active_channels[channel_index % len(active_channels)]
-            try:
-                self.schedule_clip(clip.id, dest_channel.id)
-                scheduled_count += 1
-                channel_index += 1
-            except Exception:
-                pass
+            best_channel = None
+            earliest_slot: Optional[datetime.datetime] = None
+
+            for ch in active_channels:
+                empty_slots = self.get_upcoming_empty_slots(ch.id, days_ahead=14)
+                candidate_dt = (
+                    empty_slots[0]
+                    if empty_slots
+                    else (datetime.datetime.now() + datetime.timedelta(days=15))
+                )
+
+                if earliest_slot is None or candidate_dt < earliest_slot:
+                    earliest_slot = candidate_dt
+                    best_channel = ch
+
+            if best_channel is not None:
+                try:
+                    self.schedule_clip(clip.id, best_channel.id)
+                    scheduled_count += 1
+                except Exception:
+                    pass
 
         return scheduled_count
 
