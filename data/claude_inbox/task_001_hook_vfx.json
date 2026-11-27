@@ -1,0 +1,23 @@
+{
+  "mission_id": "task_001_hook_vfx",
+  "created_at": "2026-11-27T20:33:00Z",
+  "author": "Antigravity (Arquiteto Líder)",
+  "assignee": "Claude Code (Especialista em Lógica Complexa)",
+  "objective": "Implementar módulo de Efeitos Visuais Dinâmicos de Retenção (Punch-in Zoom de 3s no Gancho & Shake de Tela nos Momentos de Rage/Susto)",
+  "target_files": [
+    "app/services/effects.py",
+    "app/services/editor.py",
+    "tests/test_effects.py"
+  ],
+  "context": "Shorts virais no YouTube e TikTok precisam prender a atenção nos primeiros 3 segundos. Para streamers como Alanzoka, Paulinho Loko e Games EduUu, um zoom dinâmico (punch-in de 15% nos primeiros 3s) e um tremor sutil de tela quando há gritos/susto ('category == rage') aumentam drasticamente a taxa de retenção dos vídeos.",
+  "instructions": [
+    "1. Crie o arquivo `app/services/effects.py` com a classe `VideoEffectsEngine`.",
+    "2. Implemente o método `build_hook_zoom_filter(fps=30, zoom_factor=1.15, duration_sec=3.0)` que gera a expressão de filtro FFmpeg para dar punch-in suave nos primeiros 3 segundos.",
+    "3. Implemente o método `build_shake_filter(intensity=5)` que aplica efeito de tremor sutil em momentos de choque/rage.",
+    "4. Integre a chamada em `app/services/editor.py` de forma opcional e segura (com fallback se o filtro falhar).",
+    "5. Crie um teste unitário em `tests/test_effects.py` validando as strings de filtros geradas.",
+    "6. Rode os testes com `python3 -m unittest tests/test_effects.py` e garanta 100% de sucesso.",
+    "7. Salve o relatório de conclusão em `data/claude_outbox/report_task_001_hook_vfx.json` e faça o commit com 'feat(claude): add retention hook zoom and screen shake vfx engine'."
+  ],
+  "status": "dispatched"
+}
