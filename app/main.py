@@ -165,7 +165,13 @@ def get_system_status(db: Session = Depends(get_db)):
     scheduled_count = db.query(ScheduledPost).filter(
         ScheduledPost.status.in_(["pending", "awaiting_oauth", "scheduled_on_youtube"])
     ).count()
-    dest_count = db.query(DestinationChannel).count()
+    dest_rows = db.query(DestinationChannel).order_by(DestinationChannel.id.asc()).all()
+    dest_count = len(dest_rows)
+    active_dest_count = sum(1 for d in dest_rows if d.is_active)
+    experiments_count = db.query(ChannelExperiment).count()
+    dest_sig = "|".join(f"{d.id}:{d.name}:{int(bool(d.is_active))}:{int(d.weight or 0)}" for d in dest_rows)
+    views_total = sum(int(p.views_count or 0) for p in db.query(ScheduledPost.views_count).all())
+    state_hash = f"{dest_sig}#{experiments_count}#{views_total}"
 
     return {
         "status": "online",
@@ -177,6 +183,9 @@ def get_system_status(db: Session = Depends(get_db)):
         "clips_rendered": rendered_count,
         "scheduled_posts": scheduled_count,
         "destination_channels": dest_count,
+        "active_destination_channels": active_dest_count,
+        "experiments_count": experiments_count,
+        "state_hash": state_hash,
         "deduplication_engine": "ACTIVE",
         "pipeline": worker.get_live_state(),
     }
@@ -2100,12 +2109,25 @@ def get_analytics_overview(db: Session = Depends(get_db)):
     """
     from collections import defaultdict
     posts = db.query(ScheduledPost).filter(ScheduledPost.status != "cancelled").all()
+    all_dests = db.query(DestinationChannel).order_by(DestinationChannel.id.asc()).all()
 
     total_views = 0
     total_likes = 0
     total_comments = 0
     ret_values = []
-    by_channel: Dict[int, Dict[str, Any]] = {}
+    by_channel: Dict[int, Dict[str, Any]] = {
+        d.id: {
+            "channel_id": d.id,
+            "channel_name": d.name,
+            "is_active": bool(d.is_active),
+            "weight": int(d.weight or 0),
+            "posts": 0,
+            "views": 0,
+            "likes": 0,
+            "comments": 0,
+        }
+        for d in all_dests
+    }
     by_streamer: Dict[str, Dict[str, Any]] = {}
     by_scene: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"scene": "", "posts": 0, "views": 0, "likes": 0})
     top_shorts = []

@@ -206,9 +206,17 @@ function startRealtimeStream() {
         knownBootId = data.boot_id;
       }
       applyStatusData(data);
+      if (typeof data.experiments_count === 'number') {
+        setText('navCountExperiments', data.experiments_count);
+      }
 
-      const snap = `${data.videos_tracked}-${data.clips_total}-${data.clips_rendered}-${data.scheduled_posts}-${data.destination_channels}-${data.monitored_channels}`;
-      if (lastSnapshot && lastSnapshot !== snap && !dndActive && !document.getElementById('editPostModal')?.classList.contains('open')) {
+      const snap = `${data.videos_tracked}-${data.clips_total}-${data.clips_rendered}-${data.scheduled_posts}-${data.destination_channels}-${data.active_destination_channels}-${data.monitored_channels}-${data.experiments_count}-${data.state_hash || ''}`;
+      const modalOpen = Boolean(
+        document.getElementById('editPostModal')?.classList.contains('open') ||
+        document.getElementById('editClipModal')?.classList.contains('open') ||
+        document.getElementById('wordsEditorModal')?.classList.contains('open')
+      );
+      if (lastSnapshot && lastSnapshot !== snap && !dndActive && !modalOpen) {
         refreshCurrentView();
       }
       lastSnapshot = snap;
@@ -2004,7 +2012,7 @@ let activeExperimentId = null;
 async function loadExperimentsView() {
   try {
     const [destRes, expRes] = await Promise.all([
-      fetch('/api/destinations'),
+      fetch('/api/destination-channels'),
       fetch('/api/experiments'),
     ]);
     const dests = destRes.ok ? await destRes.json() : [];
@@ -2015,9 +2023,11 @@ async function loadExperimentsView() {
     const sel = document.getElementById('expTargetChannel');
     if (sel) {
       const prev = sel.value || 'all';
-      sel.innerHTML = `<option value="all">Todos os canais ativos (${dests.filter((d) => d.is_active).length})</option>` +
-        dests.map((d) => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
-      sel.value = prev;
+      const activeCount = dests.filter((d) => d.is_active).length;
+      sel.innerHTML = `<option value="all">Todos os canais ativos (${activeCount})</option>` +
+        dests.map((d) => `<option value="${d.id}">${esc(d.name)}${d.is_active ? '' : ' (Pausado)'}</option>`).join('');
+      const hasPrev = Array.from(sel.options).some((o) => o.value === prev);
+      sel.value = hasPrev ? prev : 'all';
     }
 
     const listEl = document.getElementById('experimentsCardsList');
