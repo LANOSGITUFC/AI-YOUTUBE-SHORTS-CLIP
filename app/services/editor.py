@@ -11,25 +11,30 @@ YouTube Shorts, TikTok e Instagram Reels, com modos:
 import os
 import subprocess
 import json
+import logging
 import cv2
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.database.models import ClipSegment, SourceVideo
 from app.services.subtitles import SubtitleEngine
 from app.services.facecam_detector import FacecamDetector
+from app.services.effects import VideoEffectsEngine
 
 CLIPS_DIR = "./data/clips"
 THUMBNAILS_DIR = "./data/thumbnails"
+
+logger = logging.getLogger("VideoEditor")
 
 class VideoEditor:
     def __init__(self, db: Session):
         self.db = db
         self.subtitle_engine = SubtitleEngine()
         self.facecam_detector = FacecamDetector()
+        self.effects_engine = VideoEffectsEngine()
         os.makedirs(CLIPS_DIR, exist_ok=True)
         os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 
-    def render_clip(self, clip_id: int) -> Dict[str, Any]:
+    def render_clip(self, clip_id: int, enable_vfx: bool = False, shake_windows: Optional[list] = None) -> Dict[str, Any]:
         clip = self.db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
         if not clip:
             raise ValueError(f"Clipe #{clip_id} não encontrado.")
@@ -73,6 +78,12 @@ class VideoEditor:
 
         duration = clip.end_time - clip.start_time
 
+        if enable_vfx:
+            source_fps = self._detect_video_fps(video.video_path)
+            vf_filter = self._apply_vfx_filters(
+                vf_filter, clip, duration, shake_windows, fps=source_fps
+            )
+
         # 4. Executa a renderização FFmpeg
         cmd = [
             "ffmpeg", "-y",
@@ -92,6 +103,11 @@ class VideoEditor:
 
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if res.returncode != 0:
+            logger.warning(
+                "FFmpeg render failed for clip #%s (retrying without VFX/subtitles): %s",
+                clip_id,
+                (res.stderr or "")[-500:],
+            )
             # Se falhar (ex: erro no filtro ass), tenta sem filtro de legenda como fallback
             fallback_filter = self._build_simple_fallback_filter(crop_mode, facecam_box)
             fb_cmd = [
@@ -138,6 +154,51 @@ class VideoEditor:
             "duration": duration,
             "status": "rendered"
         }
+
+    def _apply_vfx_filters(
+        self,
+        vf_filter: str,
+        clip: ClipSegment,
+        duration: float,
+        shake_windows: Optional[list] = None,
+        fps: Any = 30,
+    ) -> str:
+        try:
+            zoom_filter = self.effects_engine.build_hook_zoom_filter(fps=fps)
+            windows = shake_windows
+            if windows is None:
+                category = (clip.category or "").lower()
+                windows = [(0.0, duration)] if category in ("rage", "scare") else []
+            shake_filter = self.effects_engine.build_shake_filter(windows=windows)
+            combined = self.effects_engine.compose_filters(zoom_filter, shake_filter)
+            return self.effects_engine.merge_into_filter_chain(vf_filter, combined)
+        except Exception as exc:
+            logger.warning("VFX filter build failed for clip #%s, using base filter: %s", clip.id, exc)
+            return vf_filter
+
+    @staticmethod
+    def _detect_video_fps(video_path: str) -> str:
+        try:
+            probe = subprocess.run(
+                [
+                    "ffprobe", "-v", "error",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=r_frame_rate",
+                    "-of", "default=nw=1:nk=1",
+                    video_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            token = (probe.stdout or "").strip().splitlines()
+            if probe.returncode == 0 and token:
+                value = token[0].strip()
+                if value and value not in ("0/0", "0"):
+                    return value
+        except Exception as exc:
+            logger.warning("Could not detect fps for %s, defaulting to 30: %s", video_path, exc)
+        return "30"
 
     def _build_ffmpeg_filter(self, crop_mode: str, ass_path: str, facecam_box: Optional[Dict[str, Any]] = None) -> str:
         # Escapar caminhos para FFmpeg filter

@@ -19,5 +19,5 @@
     "6. Rode os testes com `python3 -m unittest tests/test_effects.py` e garanta 100% de sucesso.",
     "7. Salve o relatório de conclusão em `data/claude_outbox/report_task_001_hook_vfx.json` e faça o commit com 'feat(claude): add retention hook zoom and screen shake vfx engine'."
   ],
-  "status": "dispatched"
+  "status": "completed"
 }

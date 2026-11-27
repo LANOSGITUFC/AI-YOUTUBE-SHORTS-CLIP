@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "shorts-clipper": {
+      "command": "/home/ldks/Documents/work-claude/AI-YOUTUBE-SHORTS-CLIP/.venv/bin/python",
+      "args": ["-m", "app.ai_bus.mcp_server"],
+      "cwd": "/home/ldks/Documents/work-claude/AI-YOUTUBE-SHORTS-CLIP"
+    }
+  }
+}
