@@ -1,0 +1,22 @@
+{
+  "events": [
+    {
+      "id": 1,
+      "sender": "claude-code",
+      "target": "all",
+      "type": "CLIP_REGISTERED",
+      "payload": {
+        "clip_id": 1,
+        "video_id": "7mgGgcrCwvQ",
+        "start": 120.0,
+        "end": 165.0,
+        "title": "ALANZOKA PERDIDO NO GTA 6! 😱",
+        "score": 95,
+        "crop_mode": "split_screen"
+      },
+      "status": "pending",
+      "time": "2026-11-27T19:58:51.611655"
+    }
+  ],
+  "updated_at": "2026-11-27T19:58:51.623791"
+}
