@@ -20,6 +20,18 @@ COOKIES_FILE = "./data/cookies.txt"
 logger = logging.getLogger("VideoDownloader")
 
 
+def get_ytdlp_extra_args() -> List[str]:
+    """Retorna flags JS runtime e cookies compatíveis com yt-dlp para uso compartilhado (monitor/downloader)."""
+    args: List[str] = []
+    if shutil.which("deno"):
+        args.extend(["--js-runtimes", "deno"])
+    elif shutil.which("node"):
+        args.extend(["--js-runtimes", "node"])
+    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
+        args.extend(["--cookies", COOKIES_FILE])
+    return args
+
+
 def extract_youtube_video_id(url_or_id: str) -> Optional[str]:
     """Extrai o ID de 11 caracteres de qualquer formato de URL do YouTube."""
     raw = (url_or_id or "").strip()

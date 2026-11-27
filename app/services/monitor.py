@@ -91,11 +91,13 @@ class ChannelMonitor:
         """
         Fallback usando yt-dlp flat-playlist.
         """
+        from app.services.downloader import get_ytdlp_extra_args
+
         new_videos = []
         try:
             cmd = [
                 "yt-dlp",
-                "--js-runtimes", "node",
+                *get_ytdlp_extra_args(),
                 "--flat-playlist",
                 "--playlist-end", str(max_results),
                 "--dump-single-json",
