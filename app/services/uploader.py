@@ -83,16 +83,47 @@ class YouTubeUploader:
                 "scheduled_for": publish_at_rfc3339,
             }
 
-        tags = [t.strip().lstrip("#") for t in (channel.default_tags or "").split(",") if t.strip()]
-        raw_title = (clip.title or "Corte Viral").strip()
-        title = raw_title if "#shorts" in raw_title.lower() else f"{raw_title[:90]} #Shorts"
-        description = (
-            f"{raw_title}\n\n"
-            f"{channel.affiliate_comment or ''}\n\n"
-            f"{' '.join(['#' + t for t in tags[:10]])}"
-        ).strip()
+        ed_cfg = {}
+        if clip.editor_config_json:
+            try:
+                ed_cfg = json.loads(clip.editor_config_json) or {}
+            except Exception:
+                ed_cfg = {}
 
-        return self._execute_real_youtube_upload(post, title, description, tags, publish_at_rfc3339)
+        if not ed_cfg.get("seo_description") or not ed_cfg.get("seo_tags"):
+            try:
+                from app.services.seo_engine import ViralSEOEngine
+                seo = ViralSEOEngine(self.db).generate_for_clip(clip, prefer_llm=False)
+                ed_cfg.setdefault("seo_description", seo["description"])
+                ed_cfg.setdefault("seo_tags", seo["tags_csv"])
+                ed_cfg.setdefault("seo_hashtags", seo["hashtags_str"])
+            except Exception:
+                pass
+
+        clip_tags = [t.strip().lstrip("#") for t in str(ed_cfg.get("seo_tags") or "").split(",") if t.strip()]
+        channel_tags = [t.strip().lstrip("#") for t in (channel.default_tags or "").split(",") if t.strip()]
+        tags = []
+        for t in clip_tags + channel_tags:
+            tl = t.lower()
+            if tl and tl not in tags:
+                tags.append(tl)
+
+        hashtags_str = str(ed_cfg.get("seo_hashtags") or "").strip()
+        if not hashtags_str:
+            hashtags_str = " ".join(["#" + t.replace(" ", "") for t in tags[:5]])
+
+        raw_title = (clip.title or "Corte Viral").strip()
+        title = raw_title if "#shorts" in raw_title.lower() else f"{raw_title[:88]} #Shorts"
+        seo_desc = str(ed_cfg.get("seo_description") or raw_title).strip()
+        aff = (channel.affiliate_comment or "").strip()
+        description_parts = [seo_desc]
+        if aff:
+            description_parts.append(aff)
+        if hashtags_str:
+            description_parts.append(hashtags_str)
+        description = "\n\n".join(description_parts).strip()
+
+        return self._execute_real_youtube_upload(post, title, description, tags[:15], publish_at_rfc3339)
 
     def _execute_real_youtube_upload(
         self,

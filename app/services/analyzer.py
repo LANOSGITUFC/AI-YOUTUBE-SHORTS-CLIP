@@ -184,6 +184,16 @@ class HighlightAnalyzer:
                 seg.pacing_score = max(1, min(100, int(cand.get("pacing_score", max(60, base_sc - 1)))))
                 seg.story_score = max(1, min(100, int(cand.get("story_score", base_sc))))
                 seg.crop_mode = default_crop
+                try:
+                    from app.services.seo_engine import ViralSEOEngine
+                    seo = ViralSEOEngine(self.db).generate_for_clip(seg, prefer_llm=False)
+                    # Se veio do detector offline, troca título bruto/cortado pelo título PT-BR de alto CTR
+                    if not provider_used.startswith("ai:"):
+                        seg.title = seo["title"]
+                    ed_cfg = {"seo_description": seo["description"], "seo_tags": seo["tags_csv"], "seo_hashtags": seo["hashtags_str"]}
+                    seg.editor_config_json = json.dumps(ed_cfg, ensure_ascii=False)
+                except Exception:
+                    pass
                 saved_clips.append(seg)
 
         video.status = "processed"

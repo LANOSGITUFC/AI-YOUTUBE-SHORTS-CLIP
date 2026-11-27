@@ -473,9 +473,38 @@ async function openEditClipModal(clipId) {
   document.getElementById('editClipProgressBar').checked = Boolean(ed.progress_bar);
   document.getElementById('editClipRemoveSilences').checked = Boolean(ed.remove_silences);
   document.getElementById('editClipAutoColor').checked = Boolean(ed.auto_color && ed.auto_color.enabled);
+  if (document.getElementById('editClipSeoDesc')) document.getElementById('editClipSeoDesc').value = ed.seo_description || '';
+  if (document.getElementById('editClipSeoTags')) document.getElementById('editClipSeoTags').value = ed.seo_tags || '';
+  if (document.getElementById('editClipSeoHashtags')) document.getElementById('editClipSeoHashtags').value = ed.seo_hashtags || '';
   setText('editClipEmojisStatus', '');
 
   openModal('editClipModal');
+}
+
+async function generateSeoForEditClip() {
+  const clipId = Number(document.getElementById('editClipId').value);
+  if (!clipId) return;
+  const btn = document.getElementById('btnGenSeoModal');
+  if (btn) { btn.disabled = true; btn.textContent = 'Gerando SEO...'; }
+  try {
+    const res = await fetch(`/api/clips/${clipId}/generate-seo`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao gerar SEO.', 'error');
+      return;
+    }
+    const seo = data.seo || {};
+    if (seo.title) document.getElementById('editClipTitle').value = seo.title;
+    if (document.getElementById('editClipSeoDesc')) document.getElementById('editClipSeoDesc').value = seo.description || '';
+    if (document.getElementById('editClipSeoTags')) document.getElementById('editClipSeoTags').value = seo.tags_csv || '';
+    if (document.getElementById('editClipSeoHashtags')) document.getElementById('editClipSeoHashtags').value = seo.hashtags_str || '';
+    showToast('Título, descrição, tags e hashtags otimizados gerados!', 'success');
+    loadClips();
+  } catch (e) {
+    showToast('Erro de rede ao gerar SEO.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Gerar Título, Descrição & Tags'; }
+  }
 }
 
 async function generateAiEmojisForEditClip() {
@@ -515,6 +544,9 @@ async function saveClipEdits(renderAfter) {
       progress_bar: Boolean(document.getElementById('editClipProgressBar')?.checked),
       remove_silences: Boolean(document.getElementById('editClipRemoveSilences')?.checked),
       auto_color: autoColorOn ? { enabled: true, sharpen: 0.5, denoise: 0.3, deblock: true, glow: false } : { enabled: false },
+      seo_description: document.getElementById('editClipSeoDesc')?.value.trim() || '',
+      seo_tags: document.getElementById('editClipSeoTags')?.value.trim() || '',
+      seo_hashtags: document.getElementById('editClipSeoHashtags')?.value.trim() || '',
     },
   };
   try {
@@ -529,7 +561,7 @@ async function saveClipEdits(renderAfter) {
       return;
     }
     closeModal('editClipModal');
-    showToast('Alterações OpusClip do clipe salvas!', 'success');
+    showToast('Alterações OpusClip & SEO do clipe salvas!', 'success');
     await loadClips();
     if (renderAfter) {
       await renderClip(clipId);
@@ -559,7 +591,9 @@ async function openExportPack(clipId) {
   try {
     const res = await fetch(`/api/clips/${clipId}/export-pack`);
     const data = await res.json();
+    if (document.getElementById('exportTitleText')) document.getElementById('exportTitleText').value = data.title || '';
     document.getElementById('exportCaptionText').value = data.caption || '';
+    if (document.getElementById('exportTagsText')) document.getElementById('exportTagsText').value = data.tags_csv || '';
     const dl = document.getElementById('exportDownloadLink');
     if (data.download_url) {
       dl.href = data.download_url;
@@ -574,14 +608,18 @@ async function openExportPack(clipId) {
   }
 }
 
-async function copyExportCaption() {
-  const txt = document.getElementById('exportCaptionText').value;
+async function copyFieldText(elId, okMsg) {
+  const txt = document.getElementById(elId)?.value || '';
   try {
     await navigator.clipboard.writeText(txt);
-    showToast('Legenda e hashtags copiadas!', 'success');
+    showToast(okMsg || 'Copiado!', 'success');
   } catch {
     showToast('Selecione e copie o texto manualmente.', 'info');
   }
+}
+
+async function copyExportCaption() {
+  return copyFieldText('exportCaptionText', 'Descrição e hashtags copiadas!');
 }
 
 /* ==========================================

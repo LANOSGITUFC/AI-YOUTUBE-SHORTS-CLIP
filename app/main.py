@@ -1186,22 +1186,55 @@ def delete_saved_layout(layout_id: str, db: Session = Depends(get_db)):
     return {"success": True, "deleted_id": layout_id}
 
 
-@app.get("/api/clips/{clip_id}/export-pack")
-def get_clip_export_pack(clip_id: int, db: Session = Depends(get_db)):
-    """Retorna kit pronto (título, legenda, hashtags, link MP4) para TikTok, Reels e Kwai."""
+@app.post("/api/clips/{clip_id}/generate-seo")
+def generate_clip_seo(clip_id: int, db: Session = Depends(get_db)):
+    """Gera título de alto CTR, descrição com CTA, 12-15 tags SEO e 5 hashtags focadas para o clipe."""
+    from app.services.seo_engine import ViralSEOEngine
+
     clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
     if not clip:
         raise HTTPException(status_code=404, detail="Clipe não encontrado.")
-    ch_name = clip.video.channel.name if (clip.video and clip.video.channel) else "Streamer"
-    safe_tag = re.sub(r"[^a-zA-Z0-9]", "", ch_name.lower())
-    hashtags = f"#shorts #clips #{safe_tag} #gaming #cortes #viral" if safe_tag else "#shorts #clips #gaming #cortes"
-    caption = f"{clip.title}\n\n{clip.hook_text or ''}\n\n{hashtags}".strip()
+
+    seo = ViralSEOEngine(db).generate_for_clip(clip, prefer_llm=True)
+    clip.title = seo["title"]
+    ed_cfg = _parse_editor_config(clip.editor_config_json)
+    ed_cfg["seo_description"] = seo["description"]
+    ed_cfg["seo_tags"] = seo["tags_csv"]
+    ed_cfg["seo_hashtags"] = seo["hashtags_str"]
+    clip.editor_config_json = json.dumps(ed_cfg, ensure_ascii=False)
+    db.commit()
+    return {"success": True, "seo": seo, "clip": _serialize_clip(clip, include_words=False)}
+
+
+@app.get("/api/clips/{clip_id}/export-pack")
+def get_clip_export_pack(clip_id: int, db: Session = Depends(get_db)):
+    """Retorna kit completo (título, descrição, tags SEO, hashtags e link MP4) para YouTube Shorts, TikTok e Reels."""
+    from app.services.seo_engine import ViralSEOEngine
+
+    clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clipe não encontrado.")
+
+    ed_cfg = _parse_editor_config(clip.editor_config_json)
+    if not ed_cfg.get("seo_description") or not ed_cfg.get("seo_tags"):
+        seo = ViralSEOEngine(db).generate_for_clip(clip, prefer_llm=False)
+        description = ed_cfg.get("seo_description") or seo["description"]
+        tags_csv = ed_cfg.get("seo_tags") or seo["tags_csv"]
+        hashtags = ed_cfg.get("seo_hashtags") or seo["hashtags_str"]
+    else:
+        description = str(ed_cfg.get("seo_description") or "").strip()
+        tags_csv = str(ed_cfg.get("seo_tags") or "").strip()
+        hashtags = str(ed_cfg.get("seo_hashtags") or "").strip()
+
+    caption = f"{clip.title}\n\n{description}\n\n{hashtags}".strip()
     is_ready = _is_valid_mp4(clip.clip_path)
     return {
         "clip_id": clip.id,
         "title": clip.title,
-        "caption": caption,
+        "description": description,
+        "tags_csv": tags_csv,
         "hashtags": hashtags,
+        "caption": caption,
         "duration": clip.duration,
         "download_url": f"/media/clips/{os.path.basename(clip.clip_path)}" if is_ready else None,
         "is_ready": is_ready,
