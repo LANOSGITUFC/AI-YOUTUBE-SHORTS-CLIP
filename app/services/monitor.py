@@ -24,6 +24,24 @@ ATOM_NS = {
 }
 
 
+MIN_LONGFORM_DURATION_SECONDS = 185.0  # YouTube Shorts vão até 180s (3 min); só processa vídeos/lives longos
+
+
+def is_youtube_short(url: str = "", title: str = "", duration_seconds: float = 0.0) -> bool:
+    """Retorna True se o vídeo for um YouTube Short (por URL /shorts/, hashtag #shorts ou duração <= 3 min)."""
+    import re as _re
+    u = (url or "").lower()
+    if "/shorts/" in u:
+        return True
+    t = (title or "").lower()
+    if _re.search(r"#shorts?\b", t):
+        return True
+    dur = float(duration_seconds or 0.0)
+    if 0.0 < dur < MIN_LONGFORM_DURATION_SECONDS:
+        return True
+    return False
+
+
 def _utc_now() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
@@ -50,7 +68,8 @@ class ChannelMonitor:
 
     def check_channel_rss(self, channel: SourceChannel) -> List[Dict[str, Any]]:
         """
-        Lê o feed RSS do canal (últimos 15 vídeos, ultrarrápido e 0 cota) e salva novos vídeos.
+        Lê o feed RSS do canal (últimos 15 vídeos, ultrarrápido e 0 cota) e salva novos vídeos longos.
+        Ignora automaticamente YouTube Shorts (/shorts/ e #shorts).
         """
         url = channel.rss_url
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -78,6 +97,14 @@ class ChannelMonitor:
                         if link_elem is not None
                         else f"https://www.youtube.com/watch?v={video_id}"
                     )
+
+                    # NUNCA enfileira YouTube Shorts dos canais dos streamers
+                    if is_youtube_short(url=video_url, title=title):
+                        existing_short = self.db.query(SourceVideo).filter(SourceVideo.id == video_id).first()
+                        if existing_short and existing_short.status == "discovered":
+                            existing_short.status = "skipped"
+                            existing_short.error_message = "YouTube Short ignorado automaticamente"
+                        continue
 
                     published_at = None
                     if published_elem is not None and published_elem.text:
@@ -162,7 +189,17 @@ class ChannelMonitor:
 
                 title = (entry.get("title") or f"Vídeo {vid_id}").strip()
                 duration = float(entry.get("duration") or 0.0)
+                entry_url = str(entry.get("webpage_url") or entry.get("url") or f"https://www.youtube.com/watch?v={vid_id}")
                 published_at = _parse_entry_date(entry)
+
+                # Ignora YouTube Shorts (< 3m05s, /shorts/ ou #shorts)
+                if is_youtube_short(url=entry_url, title=title, duration_seconds=duration):
+                    existing_short = self.db.query(SourceVideo).filter(SourceVideo.id == vid_id).first()
+                    if existing_short and existing_short.status == "discovered":
+                        existing_short.duration_seconds = duration or existing_short.duration_seconds
+                        existing_short.status = "skipped"
+                        existing_short.error_message = "YouTube Short ignorado automaticamente"
+                    continue
 
                 existing = self.db.query(SourceVideo).filter(SourceVideo.id == vid_id).first()
                 if existing:

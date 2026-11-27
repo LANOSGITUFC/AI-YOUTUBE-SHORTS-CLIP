@@ -154,6 +154,7 @@ class ViralSEOEngine:
         clip: ClipSegment,
         prefer_llm: bool = True,
         style_angle: Optional[str] = None,
+        variation_nonce: Optional[int] = None,
     ) -> Dict[str, Any]:
         raw_ch = clip.video.channel.name if (clip.video and clip.video.channel) else "Streamer"
         streamer = _clean_streamer_name(raw_ch)
@@ -168,13 +169,14 @@ class ViralSEOEngine:
             result = self._try_llm_seo(streamer, video_title, game, category, transcript_excerpt, style_angle=angle)
 
         if not result:
+            nonce = int(variation_nonce) if variation_nonce is not None else random.randint(1, 999999)
             result = self._build_smart_ptbr_seo(
                 streamer=streamer,
                 video_title=video_title,
                 game=game,
                 category=category,
                 transcript_excerpt=transcript_excerpt,
-                seed=(clip.id or int(clip.start_time or 1)) + (len(angle) * 17 if angle else 0),
+                seed=(clip.id or int(clip.start_time or 1)) + nonce + (len(angle) * 17 if angle else 0),
                 style_angle=angle,
             )
 

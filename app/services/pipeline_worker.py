@@ -162,13 +162,27 @@ class PipelineWorker:
                 except Exception as e:
                     self._log("error", f"Erro no monitor RSS: {e}")
 
-                # 2. Processar próximo vídeo descoberto (alternando entre streamers)
-                discovered_videos = (
+                # 2. Processar próximo vídeo descoberto (alternando entre streamers, IGNORANDO Shorts!)
+                from app.services.monitor import is_youtube_short
+                raw_discovered = (
                     db.query(SourceVideo)
                     .filter(SourceVideo.status == "discovered")
                     .order_by(SourceVideo.published_at.desc())
                     .all()
                 )
+                discovered_videos = []
+                skipped_shorts = 0
+                for v in raw_discovered:
+                    if is_youtube_short(url=v.url, title=v.title, duration_seconds=v.duration_seconds or 0.0):
+                        v.status = "skipped"
+                        v.error_message = "YouTube Short ignorado automaticamente"
+                        skipped_shorts += 1
+                    else:
+                        discovered_videos.append(v)
+                if skipped_shorts > 0:
+                    db.commit()
+                    self._log("info", f"{skipped_shorts} YouTube Short(s) ignorado(s) da fila.")
+
                 pending_video = None
                 if discovered_videos:
                     processed_counts = {}
@@ -192,17 +206,27 @@ class PipelineWorker:
                     self._state["current_video_title"] = pending_video.title
                     try:
                         self._log("info", f"Baixando vídeo: {pending_video.title[:60]}", stage="downloading", progress=30)
-                        downloader.download_video(pending_video.id)
+                        dl_res = downloader.download_video(pending_video.id)
                         results["downloads"] += 1
 
-                        self._log("info", f"Transcrevendo vídeo {pending_video.id}...", stage="transcribing", progress=50)
-                        transcriber.transcribe_video(pending_video.id)
-                        results["transcriptions"] += 1
+                        # Trava extra: se após baixar descobrir que era Short (< 3m05s), ignora sem transcrever/cortar
+                        dl_dur = float(dl_res.get("duration") or pending_video.duration_seconds or 0.0)
+                        if 0.0 < dl_dur < 185.0:
+                            pending_video.status = "skipped"
+                            pending_video.error_message = f"YouTube Short ({int(dl_dur)}s) ignorado automaticamente"
+                            db.commit()
+                            self._log("info", f"Vídeo curto ({int(dl_dur)}s) ignorado: {pending_video.title[:50]}")
+                            pending_video = None
 
-                        self._log("info", f"Detectando 3 a 7 momentos virais em {pending_video.id}...", stage="analyzing", progress=68)
-                        clips = analyzer.analyze_video(pending_video.id, max_clips=7, min_clips=3)
-                        results["clips_generated"] += len(clips)
-                        self._log("success", f"{len(clips)} cortes criados para {pending_video.title[:45]}", stage="analyzing", progress=74)
+                        if pending_video:
+                            self._log("info", f"Transcrevendo vídeo {pending_video.id}...", stage="transcribing", progress=50)
+                            transcriber.transcribe_video(pending_video.id)
+                            results["transcriptions"] += 1
+
+                            self._log("info", f"Detectando 3 a 7 momentos virais em {pending_video.id}...", stage="analyzing", progress=68)
+                            clips = analyzer.analyze_video(pending_video.id, max_clips=7, min_clips=3)
+                            results["clips_generated"] += len(clips)
+                            self._log("success", f"{len(clips)} cortes criados para {pending_video.title[:45]}", stage="analyzing", progress=74)
                     except Exception as e:
                         self._log("error", f"Erro no vídeo {pending_video.id}: {e}")
                         logger.debug(traceback.format_exc())

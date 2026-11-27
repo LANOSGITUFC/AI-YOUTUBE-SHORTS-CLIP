@@ -346,12 +346,16 @@ function renderClipsGrid() {
            <span class="clip-score-pill">Score ${esc(c.score)}</span>
          </div>`;
 
+    const isSel = selectedClipIds.has(c.id);
     return `
-      <article class="clip-card">
+      <article class="clip-card" style="${isSel ? 'border-color: var(--accent, #e11d48); box-shadow: 0 0 0 1px var(--accent, #e11d48);' : ''}">
         ${mediaBlock}
         <div class="clip-body">
           <div class="clip-meta-top">
-            <span>${esc(c.channel_name)}</span>
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" ${isSel ? 'checked' : ''} onchange="toggleClipSelection(${c.id})" title="Selecionar para ações em lote">
+              <span>${esc(c.channel_name)}</span>
+            </label>
             <div style="display:flex; align-items:center; gap:6px;">
               ${statusBadge}
               <button class="like-btn ${c.liked ? 'liked' : ''}" onclick="toggleLikeClip(${c.id})" title="${c.liked ? 'Remover dos favoritos' : 'Favoritar clipe'}" aria-label="Favoritar">${c.liked ? '♥' : '♡'}</button>
@@ -378,6 +382,7 @@ function renderClipsGrid() {
               ${c.is_ready ? 'Re-renderizar' : 'Renderizar 9:16'}
             </button>
             <button class="btn btn-sm" onclick="openEditClipModal(${c.id})">Editar</button>
+            <button class="btn btn-sm" id="btnSeo-${c.id}" onclick="regenerateSingleClipSeo(${c.id})" title="Gerar novamente título, descrição, tags e hashtags">↻ SEO</button>
             <button class="btn btn-sm" onclick="openLayoutEditor(${c.id})" title="Posicionar câmera, gameplay e legenda">Layout</button>
           </div>
           <div class="clip-actions-group">
@@ -388,6 +393,7 @@ function renderClipsGrid() {
       </article>
     `;
   }).join('');
+  updateSelectedClipsCounter();
 }
 
 async function toggleLikeClip(clipId) {
@@ -2457,5 +2463,124 @@ async function restoreVideoFromDrive(videoId) {
     loadAnalyticsAndStorageView();
   } catch (e) {
     showToast('Erro de rede ao restaurar do Drive.', 'error');
+  }
+}
+
+/* ==========================================
+   REGENERAÇÃO INDIVIDUAL & EM LOTE DE SEO POR SELEÇÃO
+   ========================================== */
+const selectedClipIds = new Set();
+
+function updateSelectedClipsCounter() {
+  setText('selectedClipsCount', `${selectedClipIds.size} selecionado(s)`);
+}
+
+function toggleClipSelection(clipId) {
+  if (selectedClipIds.has(clipId)) selectedClipIds.delete(clipId);
+  else selectedClipIds.add(clipId);
+  renderClipsGrid();
+}
+
+function selectAllVisibleClips() {
+  const filtered = clipsCache.filter((c) => {
+    if (currentClipFilter === 'all') return true;
+    if (currentClipFilter === 'liked') return Boolean(c.liked);
+    return c.status === currentClipFilter;
+  });
+  filtered.forEach((c) => selectedClipIds.add(c.id));
+  renderClipsGrid();
+}
+
+function clearClipSelection() {
+  selectedClipIds.clear();
+  renderClipsGrid();
+}
+
+async function regenerateSingleClipSeo(clipId) {
+  const btn = document.getElementById(`btnSeo-${clipId}`);
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    const angle = document.getElementById('batchSeoAngle')?.value || '';
+    const res = await fetch(`/api/clips/${clipId}/generate-seo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        style_angle: angle === 'rotate' ? '' : angle,
+        prefer_llm: true,
+        variation_nonce: Math.floor(Math.random() * 999999),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao regenerar SEO.', 'error');
+      return;
+    }
+    showToast(`Novo título e SEO gerados para o clipe #${clipId}!`, 'success');
+    await loadClips();
+  } catch (e) {
+    showToast('Erro de rede ao regenerar SEO.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↻ SEO'; }
+  }
+}
+
+async function regenerateSelectedClipsSeo() {
+  const ids = Array.from(selectedClipIds);
+  if (!ids.length) {
+    showToast('Marque a caixinha de 1 ou mais clipes primeiro.', 'error');
+    return;
+  }
+  const btn = document.getElementById('btnBatchSeo');
+  const angle = document.getElementById('batchSeoAngle')?.value || 'rotate';
+  if (btn) { btn.disabled = true; btn.textContent = `Regenerando (${ids.length})...`; }
+  try {
+    const res = await fetch('/api/clips/generate-seo-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clip_ids: ids, style_angle: angle, prefer_llm: true }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro no multi-regeneramento de SEO.', 'error');
+      return;
+    }
+    showToast(`SEO regenerado em lote para ${data.updated} clipe(s)!`, 'success');
+    await loadClips();
+  } catch (e) {
+    showToast('Erro de rede no multi-regeneramento de SEO.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Regenerar SEO dos selecionados'; }
+  }
+}
+
+async function exportSelectedClipsZip() {
+  const ids = Array.from(selectedClipIds);
+  if (!ids.length) {
+    return exportClipsBatchZip();
+  }
+  showToast(`Gerando .zip com ${ids.length} clipe(s) selecionado(s)...`, 'info');
+  try {
+    const res = await fetch('/api/clips/export-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clip_ids: ids }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.detail || 'Nenhum dos clipes selecionados possui MP4 renderizado.', 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `clipper_selecionados_${ids.length}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast(`Pacote .zip com ${ids.length} clipe(s) baixado!`, 'success');
+  } catch (e) {
+    showToast('Erro de rede ao exportar selecionados.', 'error');
   }
 }

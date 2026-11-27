@@ -1188,23 +1188,96 @@ def delete_saved_layout(layout_id: str, db: Session = Depends(get_db)):
 
 
 @app.post("/api/clips/{clip_id}/generate-seo")
-def generate_clip_seo(clip_id: int, db: Session = Depends(get_db)):
-    """Gera título de alto CTR, descrição com CTA, 12-15 tags SEO e 5 hashtags focadas para o clipe."""
+def generate_clip_seo(clip_id: int, payload: Optional[Dict[str, Any]] = None, db: Session = Depends(get_db)):
+    """Regenera título de alto CTR, descrição com CTA, 12-15 tags SEO e 5 hashtags focadas para o clipe."""
+    import random as _rnd
     from app.services.seo_engine import ViralSEOEngine
 
     clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
     if not clip:
         raise HTTPException(status_code=404, detail="Clipe não encontrado.")
 
-    seo = ViralSEOEngine(db).generate_for_clip(clip, prefer_llm=True)
+    body = payload or {}
+    style_angle = str(body.get("style_angle") or "").strip().lower() or None
+    prefer_llm = bool(body.get("prefer_llm", True))
+    nonce = body.get("variation_nonce")
+    if nonce is None:
+        nonce = _rnd.randint(1, 999999)
+
+    seo = ViralSEOEngine(db).generate_for_clip(
+        clip,
+        prefer_llm=prefer_llm,
+        style_angle=style_angle,
+        variation_nonce=int(nonce),
+    )
     clip.title = seo["title"]
+    clip.summary = seo["description"]
     ed_cfg = _parse_editor_config(clip.editor_config_json)
     ed_cfg["seo_description"] = seo["description"]
     ed_cfg["seo_tags"] = seo["tags_csv"]
     ed_cfg["seo_hashtags"] = seo["hashtags_str"]
+    ed_cfg["seo"] = seo
     clip.editor_config_json = json.dumps(ed_cfg, ensure_ascii=False)
     db.commit()
     return {"success": True, "seo": seo, "clip": _serialize_clip(clip, include_words=False)}
+
+
+@app.post("/api/clips/generate-seo-batch")
+def generate_clips_seo_batch(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    """
+    Multi-regeneramento de SEO (títulos, descrições, tags e hashtags) para uma lista de clipes selecionados.
+    Suporta style_angle específico ou 'rotate' para variar ângulos entre os clipes selecionados.
+    """
+    import random as _rnd
+    from app.services.seo_engine import ViralSEOEngine
+
+    raw_ids = payload.get("clip_ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise HTTPException(status_code=400, detail="Selecione ao menos um clipe para regenerar SEO.")
+
+    ids = [int(x) for x in raw_ids]
+    clips = db.query(ClipSegment).filter(ClipSegment.id.in_(ids)).all()
+    if not clips:
+        raise HTTPException(status_code=404, detail="Nenhum clipe encontrado para os IDs informados.")
+
+    angle_mode = str(payload.get("style_angle") or "").strip().lower()
+    prefer_llm = bool(payload.get("prefer_llm", True))
+    rotation_pool = ["curiosidade", "choque_reacao", "pergunta_debate", "direto_curto", "storytelling"]
+
+    engine = ViralSEOEngine(db)
+    updated_clips = []
+    base_nonce = _rnd.randint(100, 900000)
+
+    for idx, clip in enumerate(clips):
+        if angle_mode == "rotate":
+            angle = rotation_pool[idx % len(rotation_pool)]
+        elif angle_mode:
+            angle = angle_mode
+        else:
+            angle = None
+
+        seo = engine.generate_for_clip(
+            clip,
+            prefer_llm=prefer_llm,
+            style_angle=angle,
+            variation_nonce=base_nonce + idx * 31,
+        )
+        clip.title = seo["title"]
+        clip.summary = seo["description"]
+        ed_cfg = _parse_editor_config(clip.editor_config_json)
+        ed_cfg["seo_description"] = seo["description"]
+        ed_cfg["seo_tags"] = seo["tags_csv"]
+        ed_cfg["seo_hashtags"] = seo["hashtags_str"]
+        ed_cfg["seo"] = seo
+        clip.editor_config_json = json.dumps(ed_cfg, ensure_ascii=False)
+        updated_clips.append(clip)
+
+    db.commit()
+    return {
+        "success": True,
+        "updated": len(updated_clips),
+        "clips": [_serialize_clip(c, include_words=False) for c in updated_clips],
+    }
 
 
 @app.get("/api/clips/{clip_id}/export-pack")
