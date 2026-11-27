@@ -214,10 +214,45 @@ def list_monitored_channels(db: Session = Depends(get_db)):
     return out
 
 
+def _run_channel_backfill_task(channel_db_id: int, limit: int = 50, include_streams: bool = True):
+    with SessionLocal() as db:
+        ch = db.query(SourceChannel).filter(SourceChannel.id == channel_db_id).first()
+        if not ch:
+            return
+        worker._log("info", f"Puxando até {limit} vídeos históricos de {ch.name}...", stage="monitoring", progress=25)
+        mon = ChannelMonitor(db)
+        mon.check_channel_rss(ch)
+        found = mon.backfill_channel(ch, limit=limit, include_streams=include_streams)
+        worker._log("success", f"{ch.name}: +{len(found)} vídeos adicionados ao catálogo.", stage="idle", progress=100)
+
+
+def _run_all_channels_backfill_task(limit_per_channel: int = 50, include_streams: bool = True):
+    with SessionLocal() as db:
+        worker._log("info", f"Iniciando backfill profundo ({limit_per_channel} vídeos/canal)...", stage="monitoring", progress=5)
+        mon = ChannelMonitor(db)
+
+        def on_prog(idx: int, total: int, ch_name: str, added: int):
+            pct = int((idx / max(1, total)) * 95)
+            worker._log("info", f"[{idx}/{total}] {ch_name}: +{added} vídeos", stage="monitoring", progress=pct)
+
+        summary = mon.backfill_all_active_channels(
+            limit_per_channel=limit_per_channel,
+            include_streams=include_streams,
+            progress_cb=on_prog,
+        )
+        worker._log(
+            "success",
+            f"Backfill concluído: +{summary['new_videos_found']} vídeos indexados em {summary['checked']} canais.",
+            stage="idle",
+            progress=100,
+        )
+
+
 @app.post("/api/channels")
-def add_monitored_channel(payload: Dict[str, Any], db: Session = Depends(get_db)):
+def add_monitored_channel(payload: Dict[str, Any], background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     query = str(payload.get("url") or payload.get("handle") or payload.get("channel_id") or "").strip()
     custom_name = str(payload.get("name") or "").strip()
+    initial_videos = max(15, min(300, int(payload.get("initial_videos", 50) or 50)))
     if not query:
         raise HTTPException(status_code=400, detail="Informe a URL, @handle ou Channel ID do canal.")
 
@@ -246,7 +281,104 @@ def add_monitored_channel(payload: Dict[str, Any], db: Session = Depends(get_db)
     db.add(ch)
     db.commit()
     db.refresh(ch)
-    return {"success": True, "id": ch.id, "name": ch.name, "channel_id": ch.channel_id, "handle": ch.handle}
+
+    background_tasks.add_task(_run_channel_backfill_task, ch.id, initial_videos, True)
+    return {
+        "success": True,
+        "id": ch.id,
+        "name": ch.name,
+        "channel_id": ch.channel_id,
+        "handle": ch.handle,
+        "message": f"Canal '{ch.name}' adicionado! Puxando até {initial_videos} vídeos em segundo plano.",
+    }
+
+
+@app.post("/api/channels/batch")
+def add_multiple_channels(payload: Dict[str, Any], background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Adiciona vários canais de uma só vez (aceita lista ou texto com 1 URL/@handle por linha)."""
+    raw = payload.get("channels") or payload.get("urls") or ""
+    initial_videos = max(15, min(300, int(payload.get("initial_videos", 50) or 50)))
+    if isinstance(raw, str):
+        items = [line.strip() for line in raw.splitlines() if line.strip()]
+    elif isinstance(raw, list):
+        items = [str(x).strip() for x in raw if str(x).strip()]
+    else:
+        items = []
+
+    if not items:
+        raise HTTPException(status_code=400, detail="Envie pelo menos uma URL, @handle ou Channel ID.")
+
+    added = []
+    errors = []
+    for entry in items[:30]:
+        try:
+            resolved = _resolve_youtube_channel(entry)
+            existing = db.query(SourceChannel).filter(SourceChannel.channel_id == resolved["channel_id"]).first()
+            if existing:
+                errors.append({"input": entry, "error": f"Já cadastrado ({existing.name})"})
+                continue
+            handle = resolved["handle"]
+            if db.query(SourceChannel).filter(SourceChannel.handle == handle).first():
+                handle = f"@{resolved['channel_id'][:14]}"
+            ch = SourceChannel(
+                name=resolved["name"],
+                handle=handle,
+                channel_id=resolved["channel_id"],
+                url=resolved["url"],
+                rss_url=f"https://www.youtube.com/feeds/videos.xml?channel_id={resolved['channel_id']}",
+                is_active=True,
+                check_interval_minutes=20,
+            )
+            db.add(ch)
+            db.commit()
+            db.refresh(ch)
+            added.append({"id": ch.id, "name": ch.name, "handle": ch.handle, "channel_id": ch.channel_id})
+            background_tasks.add_task(_run_channel_backfill_task, ch.id, initial_videos, True)
+        except Exception as exc:
+            errors.append({"input": entry, "error": str(exc)})
+
+    return {
+        "success": len(added) > 0,
+        "added_count": len(added),
+        "added": added,
+        "errors": errors,
+        "message": f"{len(added)} canal(is) adicionado(s)! Puxando até {initial_videos} vídeos de cada um em segundo plano.",
+    }
+
+
+@app.post("/api/channels/backfill")
+def backfill_all_channels(
+    limit_per_channel: int = Query(60, ge=20, le=500),
+    include_streams: bool = Query(True),
+    background_tasks: BackgroundTasks = None,
+):
+    """Puxa histórico profundo (20 a 500 vídeos por canal) quebrando o limite de 15 do RSS."""
+    background_tasks.add_task(_run_all_channels_backfill_task, limit_per_channel, include_streams)
+    return {
+        "started": True,
+        "limit_per_channel": limit_per_channel,
+        "message": f"Puxando até {limit_per_channel} vídeos/canal (+ lives) em segundo plano! Acompanhe os números em tempo real.",
+    }
+
+
+@app.post("/api/channels/{channel_db_id}/backfill")
+def backfill_single_channel(
+    channel_db_id: int,
+    limit: int = Query(80, ge=20, le=500),
+    include_streams: bool = Query(True),
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db),
+):
+    ch = db.query(SourceChannel).filter(SourceChannel.id == channel_db_id).first()
+    if not ch:
+        raise HTTPException(status_code=404, detail="Canal fonte não encontrado.")
+    background_tasks.add_task(_run_channel_backfill_task, ch.id, limit, include_streams)
+    return {
+        "started": True,
+        "channel_id": ch.channel_id,
+        "name": ch.name,
+        "message": f"Puxando até {limit} vídeos históricos de '{ch.name}' em segundo plano!",
+    }
 
 
 @app.patch("/api/channels/{channel_db_id}/toggle")
@@ -270,7 +402,15 @@ def delete_source_channel(channel_db_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/channels/check-now")
-def trigger_channel_check(db: Session = Depends(get_db)):
+def trigger_channel_check(
+    deep: bool = Query(False),
+    limit_per_channel: int = Query(50, ge=20, le=500),
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db),
+):
+    if deep and background_tasks is not None:
+        background_tasks.add_task(_run_all_channels_backfill_task, limit_per_channel, True)
+        return {"message": f"Varredura profunda ({limit_per_channel} vídeos/canal) iniciada em segundo plano!"}
     monitor = ChannelMonitor(db)
     result = monitor.check_all_active_channels()
     return {"message": f"Varredura concluída: {result.get('new_videos_found', 0)} novos vídeos.", "result": result}
@@ -284,15 +424,18 @@ def trigger_channel_check(db: Session = Depends(get_db)):
 def list_videos(
     channel_id: Optional[str] = None,
     status: Optional[str] = None,
-    limit: int = Query(60, ge=1, le=200),
+    q: Optional[str] = None,
+    limit: int = Query(150, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
-    q = db.query(SourceVideo)
+    query = db.query(SourceVideo)
     if channel_id:
-        q = q.filter(SourceVideo.channel_id == channel_id)
+        query = query.filter(SourceVideo.channel_id == channel_id)
     if status:
-        q = q.filter(SourceVideo.status == status)
-    videos = q.order_by(SourceVideo.created_at.desc()).limit(limit).all()
+        query = query.filter(SourceVideo.status == status)
+    if q and q.strip():
+        query = query.filter(SourceVideo.title.ilike(f"%{q.strip()}%"))
+    videos = query.order_by(SourceVideo.published_at.desc(), SourceVideo.created_at.desc()).limit(limit).all()
     return [
         {
             "id": v.id,

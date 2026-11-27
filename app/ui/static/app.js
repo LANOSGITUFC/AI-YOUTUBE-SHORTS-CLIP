@@ -486,11 +486,37 @@ async function copyExportCaption() {
    VIEW 2: QUEUE & VIDEOS
    ========================================== */
 
+let videoSearchTimer = null;
+function debouncedLoadVideos() {
+  clearTimeout(videoSearchTimer);
+  videoSearchTimer = setTimeout(loadVideosTable, 250);
+}
+
+async function populateQueueChannelFilter() {
+  const sel = document.getElementById('queueChannelFilter');
+  if (!sel || sel.options.length > 1) return;
+  try {
+    const res = await fetch('/api/channels');
+    const channels = await res.json();
+    sel.innerHTML = '<option value="">Todos os canais</option>' +
+      channels.map((c) => `<option value="${esc(c.channel_id)}">${esc(c.name)} (${c.video_count})</option>`).join('');
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 async function loadVideosTable() {
   try {
+    await populateQueueChannelFilter();
     const st = document.getElementById('queueStatusFilter')?.value || '';
-    const qs = st ? `?status=${encodeURIComponent(st)}` : '';
-    const res = await fetch(`/api/videos${qs}`);
+    const ch = document.getElementById('queueChannelFilter')?.value || '';
+    const q = (document.getElementById('queueSearchInput')?.value || '').trim();
+    const params = new URLSearchParams({ limit: '250' });
+    if (st) params.set('status', st);
+    if (ch) params.set('channel_id', ch);
+    if (q) params.set('q', q);
+
+    const res = await fetch(`/api/videos?${params.toString()}`);
     const videos = await res.json();
     const tbody = document.getElementById('videosTableBody');
     if (!tbody) return;
@@ -996,7 +1022,8 @@ async function loadChannels() {
           <span class="input-mono">${esc(c.video_count)}</span> vídeos indexados
         </div>
         <div class="channel-card-foot">
-          <div style="display:flex; gap:6px;">
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick="backfillSingleChannel(${c.id}, '${esc(c.name)}')">+80 vídeos</button>
             <button class="btn btn-sm" onclick="toggleSourceChannel(${c.id})">${c.is_active ? 'Pausar' : 'Ativar'}</button>
             <a class="btn btn-ghost btn-sm" href="${esc(c.url)}" target="_blank" rel="noopener">Abrir</a>
           </div>
@@ -1009,42 +1036,77 @@ async function loadChannels() {
   }
 }
 
+async function triggerDeepBackfill(overrideLimit) {
+  const limit = overrideLimit || Number(document.getElementById('backfillLimitSelect')?.value || 100);
+  showToast(`Iniciando backfill profundo (até ${limit} vídeos/canal + lives)...`, 'info');
+  try {
+    const res = await fetch(`/api/channels/backfill?limit_per_channel=${encodeURIComponent(limit)}&include_streams=true`, {
+      method: 'POST',
+    });
+    const data = await res.json();
+    showToast(data.message || 'Backfill iniciado!', 'success');
+    fetchStatus();
+  } catch (e) {
+    showToast('Erro de rede ao iniciar backfill.', 'error');
+  }
+}
+
+async function backfillSingleChannel(id, name) {
+  showToast(`Puxando +80 vídeos históricos de ${name}...`, 'info');
+  try {
+    const res = await fetch(`/api/channels/${id}/backfill?limit=80&include_streams=true`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao puxar histórico do canal.', 'error');
+      return;
+    }
+    showToast(data.message || 'Backfill iniciado!', 'success');
+    fetchStatus();
+  } catch (e) {
+    showToast('Erro de rede ao puxar histórico.', 'error');
+  }
+}
+
 function openAddChannelModal() {
   document.getElementById('newChannelInput').value = '';
-  document.getElementById('newChannelName').value = '';
   openModal('addChannelModal');
 }
 
 async function submitNewChannel() {
-  const url = document.getElementById('newChannelInput').value.trim();
-  const name = document.getElementById('newChannelName').value.trim();
+  const raw = document.getElementById('newChannelInput').value.trim();
+  const initial_videos = Number(document.getElementById('newChannelInitialVideos')?.value || 60);
   const btn = document.getElementById('btnSubmitChannel');
-  if (!url) {
-    showToast('Informe a URL, @handle ou Channel ID.', 'error');
+  if (!raw) {
+    showToast('Cole pelo menos uma URL, @handle ou Channel ID.', 'error');
     return;
   }
   btn.disabled = true;
-  btn.textContent = 'Resolvendo canal...';
+  btn.textContent = 'Resolvendo canais...';
   try {
-    const res = await fetch('/api/channels', {
+    const res = await fetch('/api/channels/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, name }),
+      body: JSON.stringify({ channels: raw, initial_videos }),
     });
     const data = await res.json();
-    if (!res.ok) {
-      showToast(data.detail || 'Não foi possível adicionar o canal.', 'error');
+    if (!res.ok || (!data.added_count && data.errors?.length)) {
+      const errMsg = data.detail || data.errors?.[0]?.error || 'Não foi possível adicionar os canais.';
+      showToast(errMsg, 'error');
       return;
     }
     closeModal('addChannelModal');
-    showToast(`Canal '${data.name}' adicionado ao monitoramento!`, 'success');
+    const warn = data.errors?.length ? ` (${data.errors.length} ignorado(s))` : '';
+    showToast(`${data.message}${warn}`, 'success');
+    // Força recarregar dropdown de canais na fila também
+    const qSel = document.getElementById('queueChannelFilter');
+    if (qSel) qSel.innerHTML = '<option value="">Todos os canais</option>';
     loadChannels();
     fetchStatus();
   } catch (e) {
-    showToast('Erro de rede ao adicionar canal.', 'error');
+    showToast('Erro de rede ao adicionar canais.', 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Adicionar canal';
+    btn.textContent = 'Adicionar e puxar vídeos';
   }
 }
 

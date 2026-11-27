@@ -181,10 +181,14 @@
           <div class="section-header">
             <div>
               <h2 class="section-title">Fila de Vídeos & Log da Esteira</h2>
-              <p class="section-desc">Acompanhe os vídeos capturados nos canais e dispare o processamento individual quando quiser.</p>
+              <p class="section-desc">Busque vídeos, filtre por canal ou puxe o catálogo histórico completo (muito além dos 15 vídeos do RSS).</p>
             </div>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <select id="queueStatusFilter" class="select" style="width:170px;" onchange="loadVideosTable()">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <input id="queueSearchInput" type="text" class="input" style="width:210px; height:32px; padding:4px 10px;" placeholder="Buscar título..." oninput="debouncedLoadVideos()">
+              <select id="queueChannelFilter" class="select" style="width:170px; height:32px; padding:4px 8px;" onchange="loadVideosTable()">
+                <option value="">Todos os canais</option>
+              </select>
+              <select id="queueStatusFilter" class="select" style="width:150px; height:32px; padding:4px 8px;" onchange="loadVideosTable()">
                 <option value="">Todos os status</option>
                 <option value="discovered">Descobertos</option>
                 <option value="downloaded">Baixados</option>
@@ -192,6 +196,7 @@
                 <option value="processed">Processados</option>
                 <option value="error">Com erro</option>
               </select>
+              <button class="btn btn-primary btn-sm" onclick="triggerDeepBackfill(80)">+ Puxar 80/canal</button>
               <button class="btn btn-sm" onclick="loadVideosTable()">Atualizar</button>
             </div>
           </div>
@@ -399,11 +404,18 @@
           <div class="section-header">
             <div>
               <h2 class="section-title">Canais Monitorados 24/7</h2>
-              <p class="section-desc">Monitoramento contínuo via Atom/RSS sem gastar cota da API do YouTube. Ative, pause ou adicione novos canais.</p>
+              <p class="section-desc">RSS monitora novos uploads 24/7 (teto de 15 do YouTube) e o Backfill Profundo puxa de 50 a 500 vídeos + lives gravadas por canal.</p>
             </div>
-            <div style="display:flex; gap:8px;">
-              <button class="btn btn-sm" onclick="triggerCheckChannels()">Varrer agora</button>
-              <button class="btn btn-primary btn-sm" onclick="openAddChannelModal()">+ Adicionar canal</button>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <select id="backfillLimitSelect" class="select" style="width:155px; height:32px; padding:4px 8px;">
+                <option value="50">+50 vídeos / canal</option>
+                <option value="100" selected>+100 vídeos / canal</option>
+                <option value="200">+200 vídeos / canal</option>
+                <option value="500">+500 vídeos / canal</option>
+              </select>
+              <button class="btn btn-sm" onclick="triggerDeepBackfill()">Puxar histórico</button>
+              <button class="btn btn-sm" onclick="triggerCheckChannels()">Varrer RSS</button>
+              <button class="btn btn-primary btn-sm" onclick="openAddChannelModal()">+ Adicionar canais</button>
             </div>
           </div>
           <div id="channelsList" class="cards-grid-3"></div>
@@ -631,26 +643,31 @@
     </div>
   </div>
 
-  <!-- MODAL: ADICIONAR CANAL FONTE -->
+  <!-- MODAL: ADICIONAR CANAIS FONTE -->
   <div class="modal-backdrop" id="addChannelModal">
     <div class="modal-card">
       <div class="modal-head">
-        <h3>Adicionar canal para monitoramento 24/7</h3>
+        <h3>Adicionar canais para monitoramento 24/7</h3>
         <button class="btn btn-ghost btn-sm" onclick="closeModal('addChannelModal')">Fechar</button>
       </div>
       <div class="modal-body">
         <div class="field">
-          <label for="newChannelInput">URL, @handle ou Channel ID (UC...)</label>
-          <input id="newChannelInput" type="text" class="input" placeholder="https://www.youtube.com/@alanzoka ou @casimito">
+          <label for="newChannelInput">URLs, @handles ou Channel IDs (um por linha — adicione 1 ou vários!)</label>
+          <textarea id="newChannelInput" rows="4" class="textarea input-mono" placeholder="@casimito&#10;https://www.youtube.com/@cellbit&#10;https://www.youtube.com/@gaules"></textarea>
         </div>
         <div class="field">
-          <label for="newChannelName">Nome personalizado (opcional)</label>
-          <input id="newChannelName" type="text" class="input" placeholder="Deixe vazio para puxar o nome oficial">
+          <label for="newChannelInitialVideos">Quantos vídeos históricos puxar imediatamente por canal</label>
+          <select id="newChannelInitialVideos" class="select">
+            <option value="30">Últimos 30 vídeos (+ lives)</option>
+            <option value="60" selected>Últimos 60 vídeos (+ lives)</option>
+            <option value="120">Últimos 120 vídeos (+ lives)</option>
+            <option value="250">Últimos 250 vídeos (+ lives)</option>
+          </select>
         </div>
       </div>
       <div class="modal-foot">
         <button class="btn btn-sm" onclick="closeModal('addChannelModal')">Cancelar</button>
-        <button class="btn btn-primary btn-sm" id="btnSubmitChannel" onclick="submitNewChannel()">Adicionar canal</button>
+        <button class="btn btn-primary btn-sm" id="btnSubmitChannel" onclick="submitNewChannel()">Adicionar e puxar vídeos</button>
       </div>
     </div>
   </div>
