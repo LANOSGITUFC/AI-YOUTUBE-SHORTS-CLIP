@@ -66,8 +66,8 @@ class PipelineWorker:
                     transcriber.transcribe_video(pending_video.id)
                     results["transcriptions"] += 1
 
-                    logger.info(f"Detectando momentos virais com deduplicação: {pending_video.id}")
-                    clips = analyzer.analyze_video(pending_video.id, max_clips=4)
+                    logger.info(f"Detectando de 3 a 7 momentos virais com deduplicação: {pending_video.id}")
+                    clips = analyzer.analyze_video(pending_video.id, max_clips=7, min_clips=3)
                     results["clips_generated"] += len(clips)
                 except Exception as e:
                     logger.error(f"Erro no pipeline do vídeo {pending_video.id}: {traceback.format_exc()}")

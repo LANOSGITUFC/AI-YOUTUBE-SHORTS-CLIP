@@ -1,151 +1,179 @@
 """
-VIDEO EFFECTS ENGINE (RETENÇÃO)
-Gera trechos de filtro FFmpeg para efeitos de retenção em Shorts 9:16:
+Dynamic retention VFX for vertical Shorts.
 
-- Hook zoom (punch-in): começa ampliado em `zoom_factor` e volta suavemente
-  para 1.0 nos primeiros `duration_sec` segundos (curva ease-out cúbica).
-- Screen shake: tremor sutil de tela (deslocamento senoidal de poucos pixels),
-  opcionalmente limitado a uma janela de tempo.
-
-Os dois efeitos mantêm a resolução de saída fixa (padrão 1080x1920), então
-podem ser encadeados no fim de qualquer grafo de filtros do editor.
-Requer FFmpeg >= 5.0 (variável `t` no filtro scale com eval=frame).
+Provides FFmpeg filter builders for a smooth 3s punch-in zoom on the hook and
+a subtle screen shake on rage/scare moments. All filters preserve the output
+resolution (default 1080x1920) so they can be appended to the existing
+`-filter_complex` chain produced by VideoEditor.
 """
 
-from typing import Optional
+import logging
+from typing import Iterable, Optional, Sequence
+
+logger = logging.getLogger("VideoEffectsEngine")
 
 DEFAULT_WIDTH = 1080
 DEFAULT_HEIGHT = 1920
 
-# Categorias de clipe que recebem o tremor de tela
-SHAKE_CATEGORIES = {"rage", "susto", "scare"}
 
-
-def _fmt(value: float) -> str:
-    """Formata número sem notação científica e sem zeros sobrando."""
+def _num(value: float) -> str:
     text = f"{float(value):.6f}".rstrip("0").rstrip(".")
-    return text if text not in ("", "-0") else "0"
+    if "." not in text:
+        text += ".0"
+    return text
+
+
+def _fps_value(fps) -> float:
+    if isinstance(fps, str):
+        token = fps.strip()
+        if "/" in token:
+            numerator, denominator = token.split("/", 1)
+            return float(numerator) / float(denominator)
+        return float(token)
+    return float(fps)
+
+
+def _fps_token(fps) -> str:
+    if isinstance(fps, str):
+        token = fps.strip()
+        if "/" in token:
+            numerator, denominator = token.split("/", 1)
+            if float(denominator) != 0 and float(numerator) % float(denominator) == 0:
+                return str(int(float(numerator) / float(denominator)))
+            return token
+        return token
+    value = float(fps)
+    if value.is_integer():
+        return str(int(value))
+    return _num(value)
 
 
 class VideoEffectsEngine:
     def __init__(self, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT):
-        if width <= 0 or height <= 0 or width % 2 or height % 2:
-            raise ValueError("width e height devem ser positivos e pares (exigência do libx264/yuv420p)")
-        self.width = width
-        self.height = height
-
-    # ------------------------------------------------------------------ zoom
-    def hook_zoom_expression(self, zoom_factor: float = 1.15, duration_sec: float = 3.0) -> str:
-        """Expressão de zoom em função de t: zoom_factor em t=0, 1.0 a partir de duration_sec."""
-        if zoom_factor < 1.0:
-            raise ValueError("zoom_factor deve ser >= 1.0")
-        if duration_sec <= 0:
-            raise ValueError("duration_sec deve ser > 0")
-        extra = _fmt(zoom_factor - 1.0)
-        d = _fmt(duration_sec)
-        # p = progresso restante (1 -> 0); ease-out cúbico: extra * p^3
-        return f"(1+{extra}*pow(max(0,1-t/{d}),3))"
+        self.width = int(width)
+        self.height = int(height)
 
     def build_hook_zoom_filter(
         self,
         fps: int = 30,
         zoom_factor: float = 1.15,
         duration_sec: float = 3.0,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
     ) -> str:
-        """
-        Filtro de punch-in no gancho. Entrada e saída: width x height.
-        Escala o quadro por z(t) (sempre par) e recorta o centro no tamanho original.
-        """
-        if fps <= 0:
-            raise ValueError("fps deve ser > 0")
-        z = self.hook_zoom_expression(zoom_factor, duration_sec)
-        w, h = self.width, self.height
+        width = int(width) if width else self.width
+        height = int(height) if height else self.height
+        try:
+            fps_value = _fps_value(fps)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return ""
+        if fps_value <= 0 or duration_sec <= 0 or zoom_factor < 1.0:
+            return ""
+
+        z0 = float(zoom_factor)
+        delta = z0 - 1.0
+        duration = _num(duration_sec)
+        eased = f"(1-(1-in_time/{duration})*(1-in_time/{duration}))"
+        zoom_expr = f"if(lt(in_time,{duration}),{_num(z0)}-{_num(delta)}*{eased},1)"
+
         return (
-            f"scale=w='trunc({w}*{z}/2)*2':h='trunc({h}*{z}/2)*2':eval=frame,"
-            f"crop={w}:{h}:(iw-{w})/2:(ih-{h})/2,"
-            f"setsar=1,fps={fps}"
+            f"zoompan=z='{zoom_expr}'"
+            f":x='iw/2-(iw/zoom/2)'"
+            f":y='ih/2-(ih/zoom/2)'"
+            f":d=1:s={width}x{height}:fps={_fps_token(fps)}"
         )
 
-    # ----------------------------------------------------------------- shake
     def build_shake_filter(
         self,
         intensity: int = 5,
-        start_sec: Optional[float] = None,
-        end_sec: Optional[float] = None,
-        freq_x: float = 13.0,
-        freq_y: float = 17.0,
+        windows: Optional[Iterable[Sequence[float]]] = None,
+        frequency: float = 8.0,
+        amplitude: Optional[float] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
     ) -> str:
-        """
-        Tremor de tela de até `intensity` px em cada eixo. Entrada e saída: width x height.
-        Recorta uma margem de `intensity` px de cada lado, move a janela com senos de
-        frequências diferentes (movimento menos repetitivo) e volta ao tamanho original.
-        Com start_sec/end_sec, o tremor só acontece nessa janela e o resto do clipe fica intacto.
-        Nesse caso o retorno é um trecho de grafo (usa rótulos internos shk_*), que funciona
-        quando encadeado com vírgula depois de outro filtro, como faz build_retention_chain.
-        """
-        if intensity < 0:
-            raise ValueError("intensity deve ser >= 0")
-        w, h = self.width, self.height
-        if intensity == 0:
-            return f"scale={w}:{h},setsar=1"
-        if 2 * intensity >= min(w, h):
-            raise ValueError("intensity grande demais para a resolução")
-        if start_sec is not None and end_sec is not None and end_sec <= start_sec:
-            raise ValueError("end_sec deve ser maior que start_sec")
+        width = int(width) if width else self.width
+        height = int(height) if height else self.height
+        valid_windows = self._normalize_windows(windows)
+        if not valid_windows:
+            return ""
 
-        i = int(intensity)
-        fx, fy = _fmt(freq_x), _fmt(freq_y)
-        x = f"{i}+{i}*sin(2*PI*{fx}*t)"
-        y = f"{i}+{i}*sin(2*PI*{fy}*t+1.3)"
-        shaken = f"crop={w - 2 * i}:{h - 2 * i}:'{x}':'{y}',scale={w}:{h},setsar=1"
+        amp = float(intensity if amplitude is None else amplitude)
+        if amp <= 0:
+            return ""
 
-        if start_sec is None and end_sec is None:
-            # Tremor no clipe inteiro (margem de `intensity` px fica cortada o tempo todo)
-            return shaken
+        margin = max(1, int(round(max(float(intensity), amp))))
+        scaled_w = width + 2 * margin
+        scaled_h = height + 2 * margin
+        freq = float(frequency)
 
-        # Tremor só na janela: a versão tremida é sobreposta ao quadro original apenas
-        # entre start e end (overlay tem suporte a timeline). Fora da janela o quadro
-        # sai intacto, sem o zoom residual da margem recortada.
-        s = _fmt(start_sec if start_sec is not None else 0)
-        e = _fmt(end_sec) if end_sec is not None else "1e9"
-        return (
-            f"split=2[shk_base][shk_src];"
-            f"[shk_src]{shaken}[shk_fx];"
-            f"[shk_base][shk_fx]overlay=0:0:enable='between(t,{s},{e})'"
+        gate = "+".join(
+            f"between(t,{_num(start)},{_num(end)})" for start, end in valid_windows
         )
 
-    # ------------------------------------------------------------ composição
-    def build_retention_chain(
-        self,
-        category: Optional[str] = None,
-        fps: int = 30,
-        zoom_factor: float = 1.15,
-        hook_duration_sec: float = 3.0,
-        shake_intensity: int = 5,
-        shake_duration_sec: float = 1.5,
-        enable_zoom: bool = True,
-        enable_shake: bool = True,
-    ) -> str:
-        """
-        Cadeia linear (sem rótulos) para aplicar no fim do grafo do editor.
-        O shake só entra quando a categoria é de choque/rage, no início do gancho.
-        Retorna "" se nenhum efeito se aplica.
-        """
-        parts = []
-        if enable_zoom:
-            parts.append(self.build_hook_zoom_filter(fps, zoom_factor, hook_duration_sec))
-        if enable_shake and (category or "").lower() in SHAKE_CATEGORIES:
-            parts.append(self.build_shake_filter(shake_intensity, 0.0, shake_duration_sec))
-        return ",".join(parts)
+        offset_x = f"{_num(amp)}*sin(2*PI*{_num(freq)}*t)*({gate})"
+        offset_y = f"{_num(amp)}*cos(2*PI*{_num(freq * 1.3)}*t)*({gate})"
+
+        return (
+            f"scale={scaled_w}:{scaled_h},"
+            f"crop={width}:{height}:"
+            f"x='(in_w-out_w)/2+{offset_x}':"
+            f"y='(in_h-out_h)/2+{offset_y}'"
+        )
 
     @staticmethod
-    def append_to_graph(filter_graph: str, chain: str, out_label: str = "v") -> str:
-        """
-        Encadeia `chain` na saída `[out_label]` de um filter_complex já existente.
-        Se o grafo não terminar com esse rótulo, devolve o grafo sem alterações.
-        """
-        label = f"[{out_label}]"
-        if not chain or not filter_graph.endswith(label):
-            return filter_graph
-        base = filter_graph[: -len(label)]
-        return f"{base}[pre_vfx];[pre_vfx]{chain}{label}"
+    def _normalize_windows(
+        windows: Optional[Iterable[Sequence[float]]],
+    ) -> list:
+        if not windows:
+            return []
+        normalized = []
+        for item in windows:
+            try:
+                start = float(item[0])
+                end = float(item[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if end <= start:
+                continue
+            normalized.append((max(0.0, start), end))
+        normalized.sort(key=lambda window: window[0])
+        merged = []
+        for start, end in normalized:
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        return merged
+
+    @staticmethod
+    def compose_filters(*filters: Optional[str]) -> str:
+        parts = []
+        for raw in filters:
+            if not raw:
+                continue
+            cleaned = raw.strip().strip(",").strip()
+            while ",," in cleaned:
+                cleaned = cleaned.replace(",,", ",")
+            if cleaned:
+                parts.append(cleaned)
+        return ",".join(parts)
+
+    def merge_into_filter_chain(self, chain: str, extra_filters: Optional[str]) -> str:
+        extra = self.compose_filters(extra_filters)
+        if not extra:
+            return chain or ""
+        if not chain:
+            return extra
+
+        stripped = chain.rstrip()
+        if stripped.endswith("[v]"):
+            base = stripped[:-3].rstrip()
+            if not base:
+                return f"{extra}[v]"
+            if base.endswith(","):
+                return f"{base}{extra}[v]"
+            return f"{base},{extra}[v]"
+
+        separator = "" if stripped.endswith(";") else ";"
+        return f"{stripped}{separator}{extra}"

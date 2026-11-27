@@ -1,150 +1,178 @@
-"""
-Testes do VideoEffectsEngine (punch-in de gancho e screen shake).
-Valida as strings de filtro e, se houver FFmpeg instalado, renderiza um vídeo
-sintético curto para garantir que o FFmpeg aceita os filtros gerados.
-"""
-
-import os
+import json
 import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 from app.services.effects import VideoEffectsEngine
 
-FFMPEG = shutil.which("ffmpeg")
-FFPROBE = shutil.which("ffprobe")
+FFMPEG_AVAILABLE = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 
 
-class TestHookZoomFilter(unittest.TestCase):
+def _parse_rate(rate: str) -> float:
+    if "/" in rate:
+        numerator, denominator = rate.split("/", 1)
+        return float(numerator) / float(denominator)
+    return float(rate)
+
+
+def _probe_media(path: Path) -> dict:
+    probe = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,r_frame_rate,avg_frame_rate",
+            "-show_entries", "format=duration", "-of", "json", str(path),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    return json.loads(probe.stdout or "{}")
+
+
+def _skip_without_ffmpeg(func):
+    func = unittest.skipUnless(FFMPEG_AVAILABLE, "ffmpeg/ffprobe not installed")(func)
+    try:
+        import pytest
+
+        func = pytest.mark.skipif(
+            not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed"
+        )(func)
+    except ImportError:
+        pass
+    return func
+
+
+class TestVideoEffectsEngine(unittest.TestCase):
     def setUp(self):
-        self.fx = VideoEffectsEngine()
+        self.engine = VideoEffectsEngine()
 
-    def test_default_zoom_filter_string(self):
-        f = self.fx.build_hook_zoom_filter()
-        self.assertTrue(f.startswith("scale=w='trunc(1080*(1+0.15*pow(max(0,1-t/3),3))/2)*2'"))
-        self.assertIn(":eval=frame,", f)
-        self.assertIn("crop=1080:1920:(iw-1080)/2:(ih-1920)/2", f)
-        self.assertTrue(f.endswith("setsar=1,fps=30"))
+    def test_hook_zoom_default_filter(self):
+        filt = self.engine.build_hook_zoom_filter()
+        self.assertIn("zoompan", filt)
+        self.assertIn("1.15", filt)
+        self.assertIn("0.15", filt)
+        self.assertIn("in_time", filt)
+        self.assertIn("lt(in_time,3.0)", filt)
+        self.assertNotIn("lt(in,", filt)
+        self.assertIn("d=1", filt)
+        self.assertIn("s=1080x1920", filt)
+        self.assertIn("fps=30", filt)
 
-    def test_zoom_parameters_are_used(self):
-        f = self.fx.build_hook_zoom_filter(fps=60, zoom_factor=1.3, duration_sec=2.5)
-        self.assertIn("1+0.3*pow(max(0,1-t/2.5),3)", f)
-        self.assertTrue(f.endswith("fps=60"))
+    def test_hook_zoom_duration_and_fps_scaling(self):
+        filt = self.engine.build_hook_zoom_filter(fps=60, duration_sec=2.0)
+        self.assertIn("lt(in_time,2.0)", filt)
+        self.assertIn("fps=60", filt)
+        self.assertNotIn("lt(in,", filt)
 
-    def test_zoom_expression_shape(self):
-        # t=0 -> zoom_factor ; t>=duration -> 1.0 (avaliado em Python com a mesma fórmula)
-        def z(t, factor=1.15, d=3.0):
-            return 1 + (factor - 1) * max(0.0, 1 - t / d) ** 3
-        self.assertAlmostEqual(z(0), 1.15)
-        self.assertAlmostEqual(z(3.0), 1.0)
-        self.assertAlmostEqual(z(10.0), 1.0)
-        self.assertGreater(z(1.0), z(2.0))
+    def test_hook_zoom_accepts_fractional_fps_token(self):
+        filt = self.engine.build_hook_zoom_filter(fps="30000/1001")
+        self.assertIn("fps=30000/1001", filt)
+        self.assertIn("lt(in_time,3.0)", filt)
 
-    def test_zoom_invalid_values(self):
-        with self.assertRaises(ValueError):
-            self.fx.build_hook_zoom_filter(zoom_factor=0.9)
-        with self.assertRaises(ValueError):
-            self.fx.build_hook_zoom_filter(duration_sec=0)
-        with self.assertRaises(ValueError):
-            self.fx.build_hook_zoom_filter(fps=0)
+    def test_hook_zoom_custom_resolution_preserved(self):
+        filt = self.engine.build_hook_zoom_filter(width=720, height=1280)
+        self.assertIn("s=720x1280", filt)
+        self.assertNotIn("s=1080x1920", filt)
 
-    def test_custom_resolution_must_be_even(self):
-        with self.assertRaises(ValueError):
-            VideoEffectsEngine(width=1081, height=1920)
+    def test_hook_zoom_invalid_params_noop(self):
+        self.assertEqual(self.engine.build_hook_zoom_filter(fps=0), "")
+        self.assertEqual(self.engine.build_hook_zoom_filter(duration_sec=0), "")
+        self.assertEqual(self.engine.build_hook_zoom_filter(zoom_factor=0.9), "")
 
+    def test_shake_empty_windows_is_noop(self):
+        self.assertEqual(self.engine.build_shake_filter(), "")
+        self.assertEqual(self.engine.build_shake_filter(windows=[]), "")
+        self.assertEqual(self.engine.build_shake_filter(windows=[(2.0, 1.0)]), "")
 
-class TestShakeFilter(unittest.TestCase):
-    def setUp(self):
-        self.fx = VideoEffectsEngine()
+    def test_shake_windows_encoded_with_between(self):
+        filt = self.engine.build_shake_filter(windows=[(5.0, 6.5)])
+        self.assertIn("scale=1090:1930", filt)
+        self.assertIn("crop=1080:1920", filt)
+        self.assertIn("between(t,5.0,6.5)", filt)
+        self.assertIn("sin(2*PI*8.0*t)", filt)
+        self.assertIn("cos(2*PI*10.4*t)", filt)
+        self.assertIn("5.0*sin", filt)
+        self.assertIn("5.0*cos", filt)
+        self.assertNotIn("min(", filt)
 
-    def test_full_clip_shake(self):
-        f = self.fx.build_shake_filter(intensity=5)
-        self.assertEqual(
-            f,
-            "crop=1070:1910:'5+5*sin(2*PI*13*t)':'5+5*sin(2*PI*17*t+1.3)',scale=1080:1920,setsar=1",
-        )
+    def test_shake_multiple_windows(self):
+        filt = self.engine.build_shake_filter(windows=[(5.0, 6.5), (10.0, 11.0)])
+        self.assertIn("between(t,5.0,6.5)", filt)
+        self.assertIn("between(t,10.0,11.0)", filt)
+        self.assertNotIn("min(", filt)
 
-    def test_windowed_shake_uses_overlay_timeline(self):
-        f = self.fx.build_shake_filter(intensity=8, start_sec=0, end_sec=1.5)
-        self.assertTrue(f.startswith("split=2[shk_base][shk_src];[shk_src]crop=1064:1904:"))
-        self.assertTrue(f.endswith("[shk_base][shk_fx]overlay=0:0:enable='between(t,0,1.5)'"))
+    def test_shake_overlapping_windows_are_merged(self):
+        filt = self.engine.build_shake_filter(windows=[(5.0, 6.5), (6.0, 7.0)])
+        self.assertIn("between(t,5.0,7.0)", filt)
+        self.assertNotIn("between(t,6.0,7.0)", filt)
+        self.assertNotIn("min(", filt)
 
-    def test_zero_intensity_is_noop(self):
-        self.assertEqual(self.fx.build_shake_filter(intensity=0), "scale=1080:1920,setsar=1")
+    def test_shake_intensity_and_frequency_parameters(self):
+        filt = self.engine.build_shake_filter(intensity=3, frequency=10.0, windows=[(1.0, 2.0)])
+        self.assertIn("scale=1086:1926", filt)
+        self.assertIn("3.0*sin(2*PI*10.0*t)", filt)
+        self.assertIn("3.0*cos(2*PI*13.0*t)", filt)
 
-    def test_shake_invalid_values(self):
-        with self.assertRaises(ValueError):
-            self.fx.build_shake_filter(intensity=-1)
-        with self.assertRaises(ValueError):
-            self.fx.build_shake_filter(intensity=600)
-        with self.assertRaises(ValueError):
-            self.fx.build_shake_filter(intensity=5, start_sec=2, end_sec=1)
+    def test_compose_filters_no_dangling_commas(self):
+        zoom = self.engine.build_hook_zoom_filter()
+        shake = self.engine.build_shake_filter(windows=[(5.0, 6.5)])
+        combined = self.engine.compose_filters(zoom, shake)
+        self.assertIn("zoompan", combined)
+        self.assertIn("scale=1090:1930", combined)
+        self.assertNotIn(",,", combined)
+        self.assertFalse(combined.startswith(","))
+        self.assertFalse(combined.endswith(","))
+        self.assertEqual(self.engine.compose_filters("", None), "")
 
+    def test_merge_into_filter_chain(self):
+        chain = "[0:v]crop=ih*(9/16):ih:(iw-ih*(9/16))/2:0,scale=1080:1920[v]"
+        zoom = self.engine.build_hook_zoom_filter()
+        merged = self.engine.merge_into_filter_chain(chain, zoom)
+        self.assertTrue(merged.endswith("[v]"))
+        self.assertEqual(merged.count("[v]"), 1)
+        self.assertIn(",zoompan=", merged)
+        self.assertNotIn(",,", merged)
+        self.assertEqual(self.engine.merge_into_filter_chain(chain, ""), chain)
 
-class TestRetentionChain(unittest.TestCase):
-    def setUp(self):
-        self.fx = VideoEffectsEngine()
+    def _render_testsrc(self, rate: int, vfx: str, output: Path) -> None:
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", f"testsrc=size=1080x1920:rate={rate}",
+            "-t", "4",
+            "-filter_complex", f"[0:v]{vfx}[v]",
+            "-map", "[v]",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an",
+            str(output),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr[-1000:])
+        self.assertTrue(output.exists())
 
-    def test_highlight_gets_only_zoom(self):
-        chain = self.fx.build_retention_chain(category="highlight")
-        self.assertIn("eval=frame", chain)
-        self.assertNotIn("shk_", chain)
+    @_skip_without_ffmpeg
+    def test_integration_render_preserves_resolution(self):
+        zoom = self.engine.build_hook_zoom_filter()
+        shake = self.engine.build_shake_filter(windows=[(1.0, 2.0), (3.0, 3.5)])
+        vfx = self.engine.compose_filters(zoom, shake)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "vfx.mp4"
+            self._render_testsrc(30, vfx, output)
+            media = _probe_media(output)
+            stream = media["streams"][0]
+            self.assertEqual((stream["width"], stream["height"]), (1080, 1920))
+            self.assertAlmostEqual(_parse_rate(stream["r_frame_rate"]), 30.0, places=2)
+            self.assertAlmostEqual(float(media["format"]["duration"]), 4.0, delta=0.2)
 
-    def test_rage_gets_zoom_and_shake(self):
-        chain = self.fx.build_retention_chain(category="RAGE")
-        self.assertIn("eval=frame", chain)
-        self.assertIn("overlay=0:0:enable='between(t,0,1.5)'", chain)
-
-    def test_everything_disabled(self):
-        self.assertEqual(self.fx.build_retention_chain("rage", enable_zoom=False, enable_shake=False), "")
-
-    def test_append_to_graph(self):
-        graph = "[0:v]crop=ih*(9/16):ih:(iw-ih*(9/16))/2:0,scale=1080:1920[v]"
-        out = VideoEffectsEngine.append_to_graph(graph, "setsar=1")
-        self.assertEqual(
-            out,
-            "[0:v]crop=ih*(9/16):ih:(iw-ih*(9/16))/2:0,scale=1080:1920[pre_vfx];[pre_vfx]setsar=1[v]",
-        )
-
-    def test_append_to_graph_without_v_label_is_untouched(self):
-        self.assertEqual(VideoEffectsEngine.append_to_graph("scale=1080:1920", "setsar=1"), "scale=1080:1920")
-        self.assertEqual(VideoEffectsEngine.append_to_graph("[0:v]scale=1080:1920[v]", ""), "[0:v]scale=1080:1920[v]")
-
-
-@unittest.skipUnless(FFMPEG and FFPROBE, "ffmpeg/ffprobe não instalados")
-class TestFiltersRenderWithFFmpeg(unittest.TestCase):
-    def _render(self, filter_graph: str) -> dict:
-        with tempfile.TemporaryDirectory() as tmp:
-            out = os.path.join(tmp, "out.mp4")
-            cmd = [
-                FFMPEG, "-v", "error", "-y",
-                "-f", "lavfi", "-i", "testsrc2=s=1280x720:r=30:d=2",
-                "-filter_complex", filter_graph, "-map", "[v]",
-                "-c:v", "libx264", "-preset", "ultrafast", out,
-            ]
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            self.assertEqual(res.returncode, 0, res.stderr[-500:])
-            probe = subprocess.run(
-                [FFPROBE, "-v", "error", "-select_streams", "v:0",
-                 "-show_entries", "stream=width,height", "-of", "csv=p=0", out],
-                capture_output=True, text=True,
-            )
-            w, h = probe.stdout.strip().split(",")
-            return {"width": int(w), "height": int(h)}
-
-    def test_rage_chain_renders_1080x1920(self):
-        fx = VideoEffectsEngine()
-        graph = VideoEffectsEngine.append_to_graph(
-            "[0:v]crop=ih*(9/16):ih:(iw-ih*(9/16))/2:0,scale=1080:1920[v]",
-            fx.build_retention_chain(category="rage"),
-        )
-        self.assertEqual(self._render(graph), {"width": 1080, "height": 1920})
-
-    def test_full_clip_shake_renders(self):
-        fx = VideoEffectsEngine()
-        graph = "[0:v]scale=1080:1920," + fx.build_shake_filter(intensity=5) + "[v]"
-        self.assertEqual(self._render(graph), {"width": 1080, "height": 1920})
+    @_skip_without_ffmpeg
+    def test_integration_60fps_zoom_preserves_fps_and_duration(self):
+        zoom = self.engine.build_hook_zoom_filter(fps=60)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "vfx60.mp4"
+            self._render_testsrc(60, zoom, output)
+            media = _probe_media(output)
+            stream = media["streams"][0]
+            self.assertEqual((stream["width"], stream["height"]), (1080, 1920))
+            self.assertAlmostEqual(_parse_rate(stream["r_frame_rate"]), 60.0, places=2)
+            self.assertAlmostEqual(float(media["format"]["duration"]), 4.0, delta=0.2)
 
 
 if __name__ == "__main__":

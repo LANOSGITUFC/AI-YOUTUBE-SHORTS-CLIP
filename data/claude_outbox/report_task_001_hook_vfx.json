@@ -1,20 +1,6 @@
 {
   "mission_id": "task_001_hook_vfx",
-  "agent": "claude-code",
-  "status": "done",
-  "completed_at": "2026-11-27T20:55:00Z",
-  "files_changed": [
-    "app/services/effects.py",
-    "app/services/editor.py",
-    "tests/test_effects.py"
-  ],
-  "summary": "VideoEffectsEngine criado: punch-in de gancho (zoom 1.15 -> 1.0 em 3s, ease-out cúbico, via scale eval=frame + crop central) e screen shake (crop senoidal de +-intensity px; com janela de tempo usa overlay com enable para não deixar zoom residual). build_retention_chain aplica zoom sempre e shake de 1.5s no início quando category for rage/susto/scare. Integrado no VideoEditor (enable_vfx=True por padrão) via _apply_retention_vfx, com fallback: se o render com efeitos falhar, renderiza sem efeitos, e depois o fallback antigo.",
-  "bug_fixed_along_the_way": "Os comandos ffmpeg do editor não tinham '-map [v]'. Com filter_complex terminando em rótulo [v], o FFmpeg aborta com 'Filter ... has an unconnected output', então o render principal e o fallback falhavam sempre. Adicionado '-map [v] -map 0:a?' nos dois comandos.",
-  "tests": {
-    "command": "python3 -m unittest tests/test_effects.py",
-    "result": "16 testes OK (inclui render real com FFmpeg 6.1 de um vídeo sintético 1280x720 -> 1080x1920; pulado se não houver ffmpeg)",
-    "also_checked": "tests/test_full_suite.py: 5 OK; os 3 modos do editor (split_screen, blur_bg, face_tracking) + legenda .ass + efeitos renderizados com sucesso no FFmpeg"
-  },
-  "requirements": "FFmpeg >= 5.0 (variável t no scale com eval=frame). Em FFmpeg antigo o editor cai no render sem efeitos.",
-  "delivery": "Branch claude/project-thread-bqbprh + pull request no GitHub (não fiz push direto na main)."
+  "finished_at": "2026-11-27T20:43:41.830443",
+  "success": true,
+  "log": "[Esteira] software-engineer ✔ | analyser ✔ PRONTO (passou na 2ª rodada)\n\n## Missão task_001_hook_vfx: resumo\n\n**Arquivos criados ou alterados (nada foi commitado ainda):**\n- `app/services/effects.py` (novo): classe `VideoEffectsEngine`\n  - `build_hook_zoom_filter`: punch-in que começa em 1.15x e volta suavemente a 1.0x (ease-out) nos primeiros 3s. O tempo é medido em segundos, então o zoom dura 3s em qualquer fps.\n  - `build_shake_filter`: tremor 2D sutil (5px, seno em x e cosseno em y com frequências diferentes) só dentro das janelas de rage/susto. Janelas sobrepostas são unidas e uma lista vazia não aplica nada.\n- `app/services/editor.py`: integração opcional. `enable_vfx` vem `False` por padrão, então quem já chama a função não muda nada. O fps do vídeo de origem é lido via ffprobe e, se falhar, usa 30. Se a montagem do filtro der erro, ou o FFmpeg com VFX falhar, o render é refeito sem os efeitos e registra um aviso.\n- `tests/test_effects.py` (novo): 14 testes, incluindo renders reais com FFmpeg a 30 e 60fps.\n- `data/claude_outbox/report_task_001_hook_vfx.json`: relatório da missão.\n\n**Testes:** 14/14 no módulo e 19/19 na suíte completa. Os testes com FFmpeg real rodaram de fato, não foram pulados.\n\n**Rodada de correção:** na 1ª auditoria, o zoom fixava 30fps. Com um vídeo de 60fps, a saída caía para 30fps e ficava com o dobro da duração. Isso foi corrigido. O auditor conferiu à mão vídeos de entrada de 8s em 30fps 1080x1920, 60fps 1080x1920 e 60fps 720x1280. Em todos, a saída manteve o fps original, ficou em 1080x1920 com 8s, e o zoom aconteceu só nos 3s iniciais.\n\n**Pontos de atenção:**\n- Rodar a suíte de testes modifica `data/agent_bus.json`. Isso vem do `test_05` que já existia, não do código novo, e eu não reverti essa mudança.\n- Não fiz commit nem push. Se você aprovar, faço o commit `feat(claude): ...` só com os arquivos da missão, sem o `agent_bus.json`. Me diga se também quer o push para `origin main`.\n\n**\"Entrega validada pelo Analyser. Você APROVA ou "
 }

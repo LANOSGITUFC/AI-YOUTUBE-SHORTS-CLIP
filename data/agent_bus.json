@@ -2,39 +2,15 @@
   "events": [
     {
       "id": 1,
-      "sender": "claude-code",
-      "target": "all",
-      "type": "CLIP_REGISTERED",
-      "payload": {
-        "clip_id": 1,
-        "video_id": "7mgGgcrCwvQ",
-        "start": 120.0,
-        "end": 165.0,
-        "title": "ALANZOKA PERDIDO NO GTA 6! 😱",
-        "score": 95,
-        "crop_mode": "split_screen"
-      },
-      "status": "pending",
-      "time": "2026-11-27T19:58:51.611655"
-    },
-    {
-      "id": 2,
       "sender": "antigravity",
       "target": "claude-code",
-      "type": "MISSION_DISPATCHED",
+      "type": "TEST_EVENT",
       "payload": {
-        "mission_id": "task_001_hook_vfx",
-        "objective": "Implementar módulo de Efeitos Visuais Dinâmicos de Retenção (Punch-in Zoom de 3s no Gancho & Shake de Tela nos Momentos de Rage/Susto)",
-        "files": [
-          "app/services/effects.py",
-          "app/services/editor.py",
-          "tests/test_effects.py"
-        ],
-        "priority": "HIGH"
+        "msg": "Hello Claude Code"
       },
       "status": "pending",
-      "time": "2026-11-27T20:33:18.803894"
+      "time": "2026-11-27T20:42:48.358814"
     }
   ],
-  "updated_at": "2026-11-27T20:33:18.821487+00:00"
+  "updated_at": "2026-11-27T20:42:48.360410+00:00"
 }
