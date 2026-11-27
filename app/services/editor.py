@@ -680,8 +680,8 @@ class VideoEditor:
 
             return (
                 f"{input_label}split=2[cam][game];"
-                f"[cam]{cam_crop},scale=1080:840:force_original_aspect_ratio=increase,crop=1080:840,setsar=1[cam_out];"
-                f"[game]crop=iw*0.65:ih:iw*0.175:0,scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080,setsar=1[game_out];"
+                f"[cam]{cam_crop},scale=1080:600:force_original_aspect_ratio=increase,crop=1080:600,setsar=1[cam_out];"
+                f"[game]crop=iw*0.65:ih:iw*0.175:0,scale=1080:1320:force_original_aspect_ratio=increase,crop=1080:1320,setsar=1[game_out];"
                 f"[cam_out][game_out]vstack=inputs=2{output_label}"
             )
 

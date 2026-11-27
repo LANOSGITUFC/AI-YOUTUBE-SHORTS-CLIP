@@ -72,9 +72,9 @@
       enabled: true,
       has_cam: true,
       background: 'blur',
-      cam: { src: { x: 0.7, y: 0, w: 0.3, h: 0.4 }, dst: { x: 0, y: 0, w: 1080, h: 760 } },
-      game: { src: { x: 0.1875, y: 0, w: 0.625, h: 1 }, dst: { x: 0, y: 760, w: 1080, h: 1160 } },
-      caption: { x: 60, y: 1380, w: 960, h: 220 },
+      cam: { src: { x: 0.72, y: 0, w: 0.28, h: 0.34 }, dst: { x: 0, y: 0, w: 1080, h: 600 } },
+      game: { src: { x: 0.1875, y: 0, w: 0.625, h: 1 }, dst: { x: 0, y: 600, w: 1080, h: 1320 } },
+      caption: { x: 60, y: 1400, w: 960, h: 220 },
     };
   }
 
@@ -82,24 +82,24 @@
     cam_top: (L) => {
       L.name = PRESET_NAMES.cam_top;
       L.has_cam = true;
-      L.cam.dst = { x: 0, y: 0, w: 1080, h: 760 };
-      L.game.dst = { x: 0, y: 760, w: 1080, h: 1160 };
-      L.caption = { x: 60, y: 1380, w: 960, h: 220 };
+      L.cam.dst = { x: 0, y: 0, w: 1080, h: 600 };
+      L.game.dst = { x: 0, y: 600, w: 1080, h: 1320 };
+      L.caption = { x: 60, y: 1400, w: 960, h: 220 };
     },
     cam_bottom: (L) => {
       L.name = PRESET_NAMES.cam_bottom;
       L.has_cam = true;
-      L.game.dst = { x: 0, y: 0, w: 1080, h: 1160 };
-      L.cam.dst = { x: 0, y: 1160, w: 1080, h: 760 };
-      L.caption = { x: 60, y: 880, w: 960, h: 220 };
+      L.game.dst = { x: 0, y: 0, w: 1080, h: 1320 };
+      L.cam.dst = { x: 0, y: 1320, w: 1080, h: 600 };
+      L.caption = { x: 60, y: 1020, w: 960, h: 220 };
     },
     cam_float: (L) => {
       L.name = PRESET_NAMES.cam_float;
       L.has_cam = true;
       L.game.src = centerVerticalSrc();
       L.game.dst = { x: 0, y: 0, w: 1080, h: 1920 };
-      L.cam.dst = { x: 620, y: 140, w: 400, h: 400 };
-      L.caption = { x: 60, y: 1380, w: 960, h: 220 };
+      L.cam.dst = { x: 680, y: 130, w: 340, h: 340 };
+      L.caption = { x: 60, y: 1400, w: 960, h: 220 };
     },
     game_full: (L) => {
       L.name = PRESET_NAMES.game_full;

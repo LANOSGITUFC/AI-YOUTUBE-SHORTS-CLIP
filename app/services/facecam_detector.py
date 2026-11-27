@@ -208,11 +208,11 @@ class FacecamDetector:
         median_w = int(np.median(faces_arr[:, 2]))
         median_h = int(np.median(faces_arr[:, 3]))
 
-        # Expande ao redor do rosto para enquadrar ombros + cenário da webcam (proporção ~16:12 / 4:3)
-        box_w = max(int(width * 0.20), min(int(width * 0.50), int(median_w * 2.8)))
-        box_h = max(int(height * 0.22), min(int(height * 0.55), int(median_h * 2.4)))
+        # Expande ao redor do rosto com enquadramento mais fechado (foco no rosto/ombros sem vazar HUD da gameplay)
+        box_w = max(int(width * 0.16), min(int(width * 0.36), int(median_w * 2.3)))
+        box_h = max(int(height * 0.18), min(int(height * 0.40), int(median_h * 2.0)))
         box_x = max(0, median_x - int((box_w - median_w) / 2))
-        box_y = max(0, median_y - int((box_h - median_h) * 0.38))  # um pouco mais espaço abaixo do queixo (ombros)
+        box_y = max(0, median_y - int((box_h - median_h) * 0.36))
 
         if box_x + box_w > width:
             box_x = max(0, width - box_w)
