@@ -141,13 +141,12 @@ class WhisperTranscriber:
 
             with open(upload_path, "rb") as f:
                 files = {"file": (os.path.basename(upload_path), f, "audio/mpeg")}
-                data = [
-                    ("model", model),
-                    ("language", language),
-                    ("response_format", "verbose_json"),
-                    ("timestamp_granularities[]", "word"),
-                    ("timestamp_granularities[]", "segment"),
-                ]
+                data = {
+                    "model": model,
+                    "language": language,
+                    "response_format": "verbose_json",
+                    "timestamp_granularities[]": ["word", "segment"],
+                }
                 headers = {"Authorization": f"Bearer {api_key}"}
                 with httpx.Client(timeout=180.0) as client:
                     resp = client.post(url, headers=headers, data=data, files=files)

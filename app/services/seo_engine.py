@@ -327,7 +327,8 @@ class ViralSEOEngine:
 
     @staticmethod
     def _clean_word_truncate(text: str, max_len: int) -> str:
-        s = re.sub(r"\s+", " ", (text or "")).strip(" -|:;,.")
+        cleaned = re.sub(r"[<>]+", " ", (text or ""))
+        s = re.sub(r"\s+", " ", cleaned).strip(" -|:;,.")
         if len(s) <= max_len:
             return s
         return s[:max_len].rsplit(" ", 1)[0].strip(" -|:;,.")

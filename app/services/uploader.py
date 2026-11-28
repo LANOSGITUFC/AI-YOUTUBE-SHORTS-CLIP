@@ -15,6 +15,13 @@ from sqlalchemy.orm import Session
 from app.database.models import ScheduledPost, SystemSetting
 
 logger = logging.getLogger("YouTubeUploader")
+_CHANNEL_UPLOAD_COOLDOWN: Dict[int, float] = {}
+
+
+def is_channel_upload_rate_limited(channel_id: int) -> bool:
+    import time as _time
+    until = _CHANNEL_UPLOAD_COOLDOWN.get(int(channel_id), 0.0)
+    return _time.time() < until
 
 
 def to_rfc3339_utc(local_dt: datetime.datetime, tz_name: str = "America/Sao_Paulo") -> str:
@@ -112,9 +119,11 @@ class YouTubeUploader:
         if not hashtags_str:
             hashtags_str = " ".join(["#" + t.replace(" ", "") for t in tags[:5]])
 
-        raw_title = (clip.title or "Corte Viral").strip()
+        import re as _re
+        raw_title = _re.sub(r"[<>]+", " ", (clip.title or "Corte da live"))
+        raw_title = _re.sub(r"\s+", " ", raw_title).strip() or "Corte da live"
         title = raw_title if "#shorts" in raw_title.lower() else f"{raw_title[:88]} #Shorts"
-        seo_desc = str(ed_cfg.get("seo_description") or raw_title).strip()
+        seo_desc = _re.sub(r"[<>]+", " ", str(ed_cfg.get("seo_description") or raw_title)).strip()
         aff = (channel.affiliate_comment or "").strip()
         description_parts = [seo_desc]
         if aff:
@@ -214,7 +223,21 @@ class YouTubeUploader:
                 "scheduled_for": publish_at,
             }
         except Exception as e:
+            err_str = str(e)
+            if "uploadLimitExceeded" in err_str:
+                import time as _time
+                _CHANNEL_UPLOAD_COOLDOWN[post.destination_channel_id] = _time.time() + 6 * 3600
+                post.status = "pending"
+                post.error_log = "Limite diário de uploads do YouTube atingido nesta conta — aguardando liberação automática (6h)."
+                self.db.commit()
+                logger.warning("Canal #%s atingiu uploadLimitExceeded; colocado em cooldown de 6h.", post.destination_channel_id)
+                return {
+                    "success": False,
+                    "mode": "rate_limited",
+                    "channel_id": post.destination_channel_id,
+                    "message": post.error_log,
+                }
             post.status = "failed"
-            post.error_log = str(e)[:1000]
+            post.error_log = err_str[:1000]
             self.db.commit()
             raise e

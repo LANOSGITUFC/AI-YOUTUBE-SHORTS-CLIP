@@ -288,7 +288,8 @@ class PipelineWorker:
                 except Exception as e:
                     self._log("error", f"Erro no agendador: {e}")
 
-                # 5. Processar próximo upload pendente (somente se MP4 existir no disco)
+                # 5. Processar próximo upload pendente (pula contas em cooldown de uploadLimitExceeded)
+                from app.services.uploader import is_channel_upload_rate_limited
                 pending_posts = (
                     db.query(ScheduledPost)
                     .filter(ScheduledPost.status == "pending")
@@ -296,9 +297,14 @@ class PipelineWorker:
                     .all()
                 )
                 for post in pending_posts:
+                    if is_channel_upload_rate_limited(post.destination_channel_id):
+                        continue
                     if post.clip and post.clip.clip_path:
                         try:
-                            uploader.upload_scheduled_post(post.id)
+                            up_res = uploader.upload_scheduled_post(post.id)
+                            if up_res and up_res.get("mode") == "rate_limited":
+                                self._log("info", up_res.get("message", "Conta em limite diário do YouTube — pulando para próxima."))
+                                continue
                         except Exception as e:
                             self._log("error", f"Erro no upload do post #{post.id}: {e}")
                         break
