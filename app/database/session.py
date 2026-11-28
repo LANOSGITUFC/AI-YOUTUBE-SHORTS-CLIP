@@ -195,6 +195,8 @@ def init_db():
             ("SCHEDULE_INTERVAL_HOURS", "18", "Espaçamento em horas entre um vídeo e outro por canal"),
             ("SCHEDULE_VARIANCE_MINUTES", "20", "Variância orgânica em minutos (+/-) aplicada aos horários"),
             ("TIMEZONE", "America/Sao_Paulo", "Fuso horário IANA usado para converter publishAt do YouTube"),
+            ("MOMENTS_AUTO_CLIP", "true", "Esteira 24/7 transforma os melhores momentos detectados em clipes sozinha (false = só sugere no painel)"),
+            ("MOMENTS_VISUAL_MODE", "auto", "Análise visual dos melhores momentos: auto, full (todos os quadros), keyframes (rápida) ou off"),
             ("YT_COOKIES_BROWSER", "", "Navegador opcional para cookies do yt-dlp (chrome, firefox, brave)"),
             ("STUDIO_PRESET_JSON", json.dumps({
                 "font_name": "auto",

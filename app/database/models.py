@@ -45,6 +45,7 @@ class SourceVideo(Base):
 
     channel = relationship("SourceChannel", back_populates="videos")
     clips = relationship("ClipSegment", back_populates="video", cascade="all, delete-orphan")
+    moments = relationship("VideoMoment", back_populates="video", cascade="all, delete-orphan")
 
 
 class ClipSegment(Base):
@@ -88,6 +89,35 @@ class ClipSegment(Base):
     __table_args__ = (
         Index("idx_video_start_end", "video_id", "start_time", "end_time"),
     )
+
+
+class VideoMoment(Base):
+    """
+    MELHORES MOMENTOS DETECTADOS (sugestões de corte)
+    Cada linha é um trecho sugerido pelo detector multimodal (picos de áudio, fala e mudanças visuais).
+    O usuário escolhe no painel quais viram ClipSegment (status accepted + clip_id).
+    """
+    __tablename__ = "video_moments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    video_id = Column(String(50), ForeignKey("source_videos.id"), nullable=False, index=True)
+    start_time = Column(Float, nullable=False)
+    end_time = Column(Float, nullable=False)
+    peak_time = Column(Float, nullable=False)
+    score = Column(Integer, default=50)          # 1 a 99 (relevância combinada)
+    kind = Column(String(20), default="mixed")   # audio, speech, visual, mixed
+    audio_score = Column(Integer, default=0)     # 0 a 100
+    speech_score = Column(Integer, default=0)    # 0 a 100
+    visual_score = Column(Integer, default=0)    # 0 a 100
+    category = Column(String(50), default="highlight")  # funny, rage, scare, clutch, fail, highlight
+    label = Column(String(250), nullable=True)   # título sugerido
+    hook_text = Column(String(300), nullable=True)
+    reasons_json = Column(Text, nullable=True)   # lista JSON de motivos legíveis
+    status = Column(String(20), default="suggested", index=True)  # suggested, accepted, dismissed
+    clip_id = Column(Integer, ForeignKey("clip_segments.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=get_utc_now)
+
+    video = relationship("SourceVideo", back_populates="moments")
 
 
 class BrandKit(Base):

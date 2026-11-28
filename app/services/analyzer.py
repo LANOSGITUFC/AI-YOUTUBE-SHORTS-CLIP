@@ -110,6 +110,22 @@ class HighlightAnalyzer:
         with open(video.transcript_path, "r", encoding="utf-8") as f:
             transcript_data = json.load(f)
 
+        # Detecção multimodal de melhores momentos (áudio + fala + visual) antes de cortar
+        moment_det = None
+        try:
+            from app.services.moment_detector import MomentDetector
+            moment_det = MomentDetector(self.db)
+            moment_det.detect(video_id)
+        except Exception as exc:
+            logger.warning("Detector de melhores momentos falhou para %s (seguindo sem ele): %s", video_id, exc)
+            moment_det = None
+
+        # Modo manual: só sugere os momentos no painel; o usuário escolhe quais viram clipes
+        if moment_det is not None and not moment_det.auto_clip_enabled():
+            video.status = "processed"
+            self.db.commit()
+            return []
+
         duration = float(video.duration_seconds or transcript_data.get("duration") or 600.0)
         if duration < min_dur + 2:
             min_dur = max(5.0, duration * 0.5)
@@ -138,6 +154,7 @@ class HighlightAnalyzer:
             min_clips=min(min_clips, target_clips),
             min_dur=min_dur,
             max_dur=max_dur,
+            moment_det=moment_det,
         )
 
         # Completa com detector híbrido se a LLM devolveu menos cortes que o mínimo
@@ -197,6 +214,12 @@ class HighlightAnalyzer:
                     pass
                 saved_clips.append(seg)
 
+        if moment_det is not None:
+            try:
+                moment_det.mark_clips_from_candidates(video_id, saved_clips)
+            except Exception as exc:
+                logger.debug("Não foi possível marcar momentos usados: %s", exc)
+
         video.status = "processed"
         self.db.commit()
         return saved_clips
@@ -228,10 +251,17 @@ class HighlightAnalyzer:
         min_clips: int,
         min_dur: float,
         max_dur: float,
+        moment_det=None,
     ) -> tuple[List[Dict[str, Any]], str]:
         segments = transcript_data.get("segments", [])
+        moment_cands: List[Dict[str, Any]] = []
+        if moment_det is not None:
+            try:
+                moment_cands = moment_det.candidates_for_analyzer(video.id, available_windows, min_dur, max_dur)
+            except Exception as exc:
+                logger.debug("Momentos indisponíveis para o analisador: %s", exc)
         if not segments:
-            return [], "acoustic_hybrid"
+            return (moment_cands[:target_clips], "moments") if moment_cands else ([], "acoustic_hybrid")
 
         provider = self._get_setting("AI_PROVIDER", default="offline").lower()
         gemini_key = self._get_setting("GEMINI_API_KEY", env_fallback="GEMINI_API_KEY")
@@ -248,6 +278,16 @@ class HighlightAnalyzer:
             target_clips=target_clips,
         )
         user_prompt = self._build_transcript_prompt(video.title, segments, available_windows)
+        if moment_det is not None:
+            try:
+                hints = moment_det.prompt_hints(video.id)
+                if hints:
+                    user_prompt += (
+                        "\n\nMOMENTOS FORTES DETECTADOS POR SINAIS (picos de áudio, fala e visual). "
+                        "Use como pistas, priorize-os se a fala confirmar:\n" + hints
+                    )
+            except Exception:
+                pass
 
         from app.services.key_pool import execute_with_key_pool
 
@@ -285,6 +325,10 @@ class HighlightAnalyzer:
                     break
             except Exception as exc:
                 logger.warning("Falha na chamada LLM '%s' (caindo para fallback): %s", name, exc)
+
+        if not detected_list and moment_cands:
+            detected_list = moment_cands[:target_clips]
+            used_provider = "moments"
 
         if not detected_list:
             detected_list = self._hybrid_acoustic_text_detector(

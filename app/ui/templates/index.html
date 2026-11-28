@@ -10,6 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css">
   <link rel="stylesheet" href="/static/layout_editor.css">
+  <link rel="stylesheet" href="/static/moments.css">
 </head>
 <body>
   <div class="app-shell">
@@ -31,6 +32,14 @@
             Clipes 9:16
           </span>
           <span class="nav-count" id="navCountClips">0</span>
+        </button>
+
+        <button class="nav-item" data-view="moments" onclick="switchView('moments')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h3l3-8 4 16 3-10 2 2h5"/></svg>
+            Melhores Momentos
+          </span>
+          <span class="nav-count" id="navCountMoments">0</span>
         </button>
 
         <button class="nav-item" data-view="queue" onclick="switchView('queue')">
@@ -234,6 +243,84 @@
             </div>
           </div>
           <div id="clipsGrid" class="clips-grid"></div>
+        </section>
+
+        <!-- VIEW: MELHORES MOMENTOS (detecção multimodal) -->
+        <section id="view-moments" class="view-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Melhores Momentos</h2>
+              <p class="section-desc">A IA ouve o áudio (gritos, risadas, reações), lê a fala (frases de impacto) e olha a tela (cortes e ação) para achar os trechos mais fortes. Escolha quais viram clipes.</p>
+            </div>
+            <div class="moments-toolbar">
+              <select id="momentsVideoSelect" class="select" aria-label="Vídeo analisado" onchange="loadMomentsForVideo()"></select>
+              <button class="btn btn-primary btn-sm" id="btnDetectMoments" onclick="detectMomentsNow(false)">Detectar agora</button>
+              <button class="btn btn-sm" id="btnRedetectMoments" onclick="detectMomentsNow(true)" title="Refaz a análise de áudio e vídeo do zero">Reanalisar tudo</button>
+            </div>
+          </div>
+
+          <div class="panel moments-settings">
+            <label class="moments-switch">
+              <input type="checkbox" id="momentsAutoClip" onchange="saveMomentsSettings()">
+              <span>
+                <strong>Modo automático</strong>
+                <small>A esteira 24/7 transforma os melhores momentos em clipes sozinha. Desligado, ela só sugere aqui e você escolhe.</small>
+              </span>
+            </label>
+            <label class="moments-visual-mode" for="momentsVisualMode">
+              <span>Análise visual</span>
+              <select id="momentsVisualMode" class="select" onchange="saveMomentsSettings()">
+                <option value="auto">Automática</option>
+                <option value="full">Completa (mais precisa)</option>
+                <option value="keyframes">Rápida (lives longas)</option>
+                <option value="off">Desligada</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="panel moments-heat-panel">
+            <div class="moments-heat-head">
+              <strong>Mapa de intensidade</strong>
+              <span id="momentsJobStatus" class="moments-job" role="status" aria-live="polite"></span>
+            </div>
+            <div id="momentsHeat" class="moments-heat"></div>
+            <div class="moments-legend">
+              <span><i class="lg lg-audio"></i>Áudio</span>
+              <span><i class="lg lg-speech"></i>Fala</span>
+              <span><i class="lg lg-visual"></i>Visual</span>
+              <span><i class="lg lg-moment"></i>Momento sugerido</span>
+              <span><i class="lg lg-used"></i>Já cortado</span>
+            </div>
+          </div>
+
+          <div class="moments-filters">
+            <div class="filter-pills" role="group" aria-label="Tipo de momento">
+              <button class="pill-btn active" data-moment-kind="all" onclick="setMomentKind('all', this)">Todos</button>
+              <button class="pill-btn" data-moment-kind="audio" onclick="setMomentKind('audio', this)">Áudio</button>
+              <button class="pill-btn" data-moment-kind="speech" onclick="setMomentKind('speech', this)">Fala</button>
+              <button class="pill-btn" data-moment-kind="visual" onclick="setMomentKind('visual', this)">Visual</button>
+              <button class="pill-btn" data-moment-kind="mixed" onclick="setMomentKind('mixed', this)">Misto</button>
+            </div>
+            <div class="filter-pills" role="group" aria-label="Situação">
+              <button class="pill-btn active" data-moment-status="suggested" onclick="setMomentStatus('suggested', this)">Sugeridos</button>
+              <button class="pill-btn" data-moment-status="accepted" onclick="setMomentStatus('accepted', this)">Viraram clipe</button>
+              <button class="pill-btn" data-moment-status="dismissed" onclick="setMomentStatus('dismissed', this)">Descartados</button>
+              <button class="pill-btn" data-moment-status="all" onclick="setMomentStatus('all', this)">Tudo</button>
+            </div>
+            <select id="momentsSort" class="select moments-sort" aria-label="Ordenar" onchange="renderMoments()">
+              <option value="score">Maior score</option>
+              <option value="time">Ordem no vídeo</option>
+            </select>
+          </div>
+
+          <div class="moments-batch">
+            <span id="momentsSelectedCount">0 selecionado(s)</span>
+            <button class="btn btn-sm" onclick="selectAllMoments()">Selecionar visíveis</button>
+            <button class="btn btn-primary btn-sm" id="btnAcceptMomentsBatch" onclick="acceptSelectedMoments()" disabled>Virar clipes selecionados</button>
+            <button class="btn btn-ghost btn-sm" onclick="dismissRemainingMoments()">Descartar restantes</button>
+          </div>
+
+          <div id="momentsGrid" class="moments-grid"></div>
         </section>
 
         <!-- VIEW 2: FILA & ESTEIRA AO VIVO -->
@@ -1057,6 +1144,56 @@
     </div>
   </div>
 
+  <!-- MODAL: AJUSTAR MOMENTO E VIRAR CLIPE -->
+  <div class="modal-backdrop" id="momentModal">
+    <div class="modal-card moment-modal" role="dialog" aria-modal="true" aria-labelledby="momentModalTitle">
+      <div class="modal-head">
+        <h3 id="momentModalTitle">Ajustar momento</h3>
+        <button class="btn btn-ghost btn-sm" onclick="closeMomentModal()">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <div id="momentPreviewWrap" class="moment-preview">
+          <video id="momentPreviewVideo" preload="metadata" playsinline controls></video>
+          <div class="moment-preview-actions">
+            <button class="btn btn-sm" onclick="playMomentRange()">Tocar trecho</button>
+            <button class="btn btn-sm" onclick="setMomentEdgeFromVideo('start')">Início aqui</button>
+            <button class="btn btn-sm" onclick="setMomentEdgeFromVideo('end')">Fim aqui</button>
+          </div>
+        </div>
+        <p id="momentPreviewMissing" class="section-desc" hidden>O vídeo original não está no disco (só a transcrição). Dá para ajustar pelos números.</p>
+        <div class="field">
+          <label for="momentEditTitle">Título do Short</label>
+          <input id="momentEditTitle" type="text" class="input" maxlength="240">
+        </div>
+        <div class="form-grid-2">
+          <div class="field">
+            <label for="momentEditStart">Início (segundos)</label>
+            <input id="momentEditStart" type="number" step="0.5" min="0" class="input input-mono" oninput="updateMomentDuration()">
+          </div>
+          <div class="field">
+            <label for="momentEditEnd">Fim (segundos)</label>
+            <input id="momentEditEnd" type="number" step="0.5" min="1" class="input input-mono" oninput="updateMomentDuration()">
+          </div>
+        </div>
+        <div id="momentEditDuration" class="section-desc"></div>
+        <div class="field">
+          <label for="momentEditCrop">Layout 9:16</label>
+          <select id="momentEditCrop" class="select">
+            <option value="">Padrão das configurações</option>
+            <option value="split_screen">Split-Screen Gamer</option>
+            <option value="blur_bg">Fundo Blur 16:9</option>
+            <option value="face_tracking">Center Crop 9:16</option>
+          </select>
+        </div>
+        <div id="momentEditError" class="form-error" hidden></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-sm" onclick="closeMomentModal()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" id="btnMomentModalAccept" onclick="acceptMomentFromModal()">Virar clipe</button>
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL: ADICIONAR CANAIS FONTE -->
   <div class="modal-backdrop" id="addChannelModal">
     <div class="modal-card">
@@ -1119,5 +1256,6 @@
 
   <script src="/static/app.js"></script>
   <script src="/static/layout_editor.js"></script>
+  <script src="/static/moments.js"></script>
 </body>
 </html>
