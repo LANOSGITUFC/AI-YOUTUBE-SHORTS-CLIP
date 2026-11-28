@@ -1061,7 +1061,11 @@ async function loadSettingsIntoUI() {
       document.getElementById('presetEnableSubs').checked = p.enable_subtitles !== false;
       document.getElementById('presetUppercase').checked = p.uppercase !== false;
       document.getElementById('presetEnableVfx').checked = p.enable_vfx !== false;
+      if (document.getElementById('presetLanguage')) document.getElementById('presetLanguage').value = p.caption_language || 'auto';
+      if (document.getElementById('presetOutlineWidth')) document.getElementById('presetOutlineWidth').value = p.outline_width ?? 6;
+      if (p.preset_id) selectedPresetId = p.preset_id;
       updatePresetPreview();
+      loadTranscriptionStatus();
     }
   } catch (e) {
     console.error(e);
@@ -1100,24 +1104,102 @@ function updatePresetPreview() {
 
   const sub = document.getElementById('previewSubtitle');
   if (!sub) return;
+  const outlineW = Number(document.getElementById('presetOutlineWidth')?.value ?? 6);
+  setText('outlineWidthVal', outlineW);
+  const frame = document.getElementById('phoneFramePreview');
+  // Escala real do preview: altura do celular na tela / 1920px do vídeo
+  const scale = frame && frame.clientHeight ? frame.clientHeight / 1920 : 0.25;
+  const big = styleMode === 'single_word' ? 1.18 : 1;
   sub.style.display = enableSubs ? 'block' : 'none';
-  // Escala de 1920px -> 480px (fator 0.25)
-  sub.style.bottom = `${Math.round(marginV * 0.25)}px`;
-  sub.style.fontSize = `${Math.max(12, Math.round(fontSize * 0.27))}px`;
+  sub.style.bottom = `${Math.round(marginV * scale)}px`;
+  sub.style.fontSize = `${Math.max(11, Math.round(fontSize * big * scale * 1.08))}px`;
   sub.style.color = primary;
   sub.style.textTransform = uppercase ? 'uppercase' : 'none';
+  const fontName = document.getElementById('presetFontName')?.value || 'auto';
+  sub.style.fontFamily = fontName === 'auto' ? '' : `"${fontName}", var(--font-sans, sans-serif)`;
   sub.style.background = styleMode === 'box_caption' ? 'rgba(0,0,0,0.72)' : 'transparent';
   sub.style.padding = styleMode === 'box_caption' ? '6px 10px' : '0';
   sub.style.borderRadius = styleMode === 'box_caption' ? '6px' : '0';
-  sub.style.textShadow = styleMode === 'clean_minimal'
+  const ow = Math.max(0, Math.round(outlineW * scale * 1.3 * 10) / 10);
+  sub.style.textShadow = styleMode === 'clean_minimal' || ow === 0
     ? `0 2px 4px ${outline}`
-    : `-2px -2px 0 ${outline}, 2px -2px 0 ${outline}, -2px 2px 0 ${outline}, 2px 2px 0 ${outline}, 0 3px 6px rgba(0,0,0,0.85)`;
+    : `-${ow}px -${ow}px 0 ${outline}, ${ow}px -${ow}px 0 ${outline}, -${ow}px ${ow}px 0 ${outline}, ${ow}px ${ow}px 0 ${outline}, 0 ${ow + 1}px ${ow * 2 + 2}px rgba(0,0,0,0.85)`;
 
-  const activeWord = document.getElementById('previewActiveWord');
-  if (activeWord) {
-    activeWord.style.color = (styleMode === 'word_highlight' || styleMode === 'karaoke_pop') ? highlight : primary;
-    activeWord.style.display = 'inline-block';
-    activeWord.style.transform = styleMode === 'karaoke_pop' ? 'scale(1.12)' : 'scale(1)';
+  captionPreviewState.mode = styleMode;
+  captionPreviewState.primary = primary;
+  captionPreviewState.highlight = highlight;
+  captionPreviewState.wordsPerLine = Math.max(1, Number(document.getElementById('presetWordsPerLine').value) || 3);
+  captionPreviewState.language = document.getElementById('presetLanguage')?.value || 'auto';
+  startCaptionPreviewLoop();
+}
+
+/* Prévia animada das legendas: simula a fala palavra a palavra no celular do preview */
+var CAPTION_DEMO = {
+  pt: 'olha esse clutch absurdo no finalzinho da partida mano',
+  en: 'look at this insane clutch right at the end of the match',
+};
+var captionPreviewState = { idx: 0, timer: null, mode: 'word_highlight', primary: '#FFFFFF', highlight: '#FACC15', wordsPerLine: 3, language: 'auto' };
+
+function renderCaptionPreviewFrame() {
+  const sub = document.getElementById('previewSubtitle');
+  if (!sub) return;
+  const st = captionPreviewState;
+  const words = (st.language === 'en' ? CAPTION_DEMO.en : CAPTION_DEMO.pt).split(' ');
+  const i = st.idx % words.length;
+  const per = st.mode === 'single_word' ? 1 : st.wordsPerLine;
+  const chunkStart = Math.floor(i / per) * per;
+  const chunk = words.slice(chunkStart, chunkStart + per);
+  const activeInChunk = i - chunkStart;
+  const pop = ['karaoke_pop', 'word_reveal', 'single_word'].includes(st.mode);
+  const highlightOn = st.mode !== 'clean_minimal';
+  const visible = st.mode === 'word_reveal' ? chunk.slice(0, activeInChunk + 1) : chunk;
+
+  sub.replaceChildren(...visible.map((w, j) => {
+    const span = document.createElement('span');
+    const isActive = j === activeInChunk;
+    span.className = 'cap-word' + (isActive ? ' is-active' : '') + (isActive && pop ? ' pop' : '');
+    span.textContent = w;
+    span.style.color = isActive && highlightOn ? st.highlight : st.primary;
+    return span;
+  }));
+  st.idx = (i + 1) % words.length;
+}
+
+function startCaptionPreviewLoop() {
+  renderCaptionPreviewFrame();
+  if (captionPreviewState.timer) return;
+  captionPreviewState.timer = setInterval(() => {
+    const view = document.getElementById('view-presets');
+    if (view && !view.classList.contains('active')) return;
+    renderCaptionPreviewFrame();
+  }, 380);
+}
+
+window.addEventListener('resize', () => {
+  if (document.getElementById('previewSubtitle')) updatePresetPreview();
+});
+
+async function loadTranscriptionStatus() {
+  const textEl = document.getElementById('transcribeStatusText');
+  const dot = document.getElementById('transcribeDot');
+  if (!textEl || !dot) return;
+  try {
+    const res = await fetch('/api/transcription/status');
+    const st = await res.json();
+    const engines = [];
+    if (st.groq) engines.push('Groq Whisper');
+    if (st.openai) engines.push('OpenAI Whisper');
+    if (st.faster_whisper) engines.push('Whisper local');
+    if (st.any) {
+      dot.className = 'transcribe-dot ok';
+      textEl.textContent = `Transcrição automática ativa (${engines.join(' + ')}). Todo clipe novo recebe legenda sincronizada sozinho.`;
+    } else {
+      dot.className = 'transcribe-dot warn';
+      textEl.textContent = 'Sem motor de transcrição: só vídeos com legenda do YouTube terão legenda. Coloque a chave grátis da Groq (GROQ_API_KEY) em Configurações.';
+    }
+  } catch (e) {
+    dot.className = 'transcribe-dot warn';
+    textEl.textContent = 'Não consegui verificar o motor de transcrição.';
   }
 }
 
@@ -1130,8 +1212,10 @@ async function saveStudioPreset() {
       primary_color: document.getElementById('presetPrimaryColor').value,
       highlight_color: document.getElementById('presetHighlightColor').value,
       outline_color: document.getElementById('presetOutlineColor').value,
-      outline_width: 6,
+      outline_width: Number(document.getElementById('presetOutlineWidth')?.value ?? 6),
       shadow_depth: 3,
+      caption_language: document.getElementById('presetLanguage')?.value || 'auto',
+      preset_id: selectedPresetId || undefined,
       margin_v: Number(document.getElementById('presetMarginV').value),
       words_per_line: Number(document.getElementById('presetWordsPerLine').value),
       uppercase: document.getElementById('presetUppercase').checked,
@@ -1385,50 +1469,61 @@ async function loadDestinations() {
     }
 
     if (summaryBar) summaryBar.style.display = 'block';
-    container.innerHTML = channels.map((c) => `
-      <article class="channel-card ${c.is_active ? '' : 'paused'}">
+    destChannelsCache = channels;
+    container.innerHTML = channels.map((c) => {
+      const paused = !c.is_active;
+      const kept = c.paused_weight ?? 0;
+      return `
+      <article class="channel-card dest-card ${paused ? 'paused' : ''}" data-dest-card="${c.id}">
         <div class="channel-card-head">
-          <div>
-            <div style="font-weight:600; font-size:14px;">${esc(c.name)}</div>
-            <div class="input-mono" style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+          <div style="min-width:0;">
+            <div class="dest-name">${esc(c.name)}</div>
+            <div class="input-mono dest-sub">
               ${esc(c.youtube_channel_id || 'Aguardando autorização OAuth')}
             </div>
           </div>
-          <span class="badge ${c.has_token ? 'badge-ok' : 'badge-warn'}">
-            ${c.has_token ? 'OAuth Ativo' : 'Sem Token'}
-          </span>
+          <div class="dest-badges">
+            ${paused ? '<span class="badge badge-warn">Pausado</span>' : ''}
+            <span class="badge ${c.has_token ? 'badge-ok' : 'badge-warn'}">
+              ${c.has_token ? 'OAuth Ativo' : 'Sem Token'}
+            </span>
+          </div>
         </div>
 
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12px; color:var(--text-secondary);">
-          <span>Meta: <strong style="color:var(--text-primary);">${esc(c.daily_post_limit)}/dia</strong></span>
-          <span>Agendados: <strong class="input-mono" style="color:var(--text-primary);">${esc(c.scheduled_count)}</strong></span>
-          <div style="display:flex; align-items:center; gap:6px;">
-            <label for="weightInput-${c.id}" style="color:var(--text-secondary);">Peso:</label>
-            <input
-              data-channel-id="${c.id}"
-              id="weightInput-${c.id}"
-              type="number"
-              min="0"
-              max="100"
-              value="${c.weight ?? 0}"
-              oninput="updateWeightSummary()"
-              class="input input-mono weight-input"
-              style="width:68px; padding:4px 6px; text-align:center;"
-            >
-            <span class="input-mono">%</span>
+        <div class="dest-stats">
+          <span>Meta: <strong>${esc(c.daily_post_limit)}/dia</strong></span>
+          <span>Agendados: <strong class="input-mono">${esc(c.scheduled_count)}</strong></span>
+          <div class="dest-weight">
+            <label for="weightInput-${c.id}">Peso:</label>
+            ${paused
+              ? `<span class="input-mono dest-weight-kept" title="Peso guardado: volta quando o canal for reativado">0% <small>(volta com ${esc(kept)}%)</small></span>`
+              : `<input
+                  data-channel-id="${c.id}"
+                  id="weightInput-${c.id}"
+                  type="number"
+                  inputmode="numeric"
+                  min="0"
+                  max="100"
+                  value="${c.weight ?? 0}"
+                  oninput="updateWeightSummary()"
+                  class="input input-mono weight-input"
+                ><span class="input-mono">%</span>`}
           </div>
         </div>
 
         <div class="channel-card-foot">
           <button class="btn btn-sm" onclick="toggleDestination(${c.id})">
-            ${c.is_active ? 'Pausar canal' : 'Ativar canal'}
+            ${paused ? 'Reativar canal' : 'Pausar canal'}
           </button>
           <a class="btn btn-sm" href="/api/auth/youtube/login?channel_name=${encodeURIComponent(c.name)}">
             ${c.has_token ? 'Reconectar OAuth' : 'Conectar OAuth'}
           </a>
+          <button class="btn btn-sm btn-danger" data-delete-dest="${c.id}" onclick="deleteDestination(${c.id}, this)">
+            Apagar conta
+          </button>
         </div>
-      </article>
-    `).join('');
+      </article>`;
+    }).join('');
 
     updateWeightSummary();
   } catch (e) {
@@ -1436,32 +1531,88 @@ async function loadDestinations() {
   }
 }
 
+let destChannelsCache = [];
+
+function readWeightInputs() {
+  return Array.from(document.querySelectorAll('.weight-input')).map((el) => ({
+    el,
+    id: el.getAttribute('data-channel-id'),
+    value: Math.max(0, Math.min(100, parseInt(el.value || '0', 10) || 0)),
+  }));
+}
+
+/* Inteiros que somam exatamente `total` (maior resto), igual ao backend. */
+function largestRemainder(shares, total) {
+  const keys = Object.keys(shares);
+  if (!keys.length) return {};
+  let sum = keys.reduce((a, k) => a + Math.max(0, shares[k]), 0);
+  const base = sum > 0 ? shares : Object.fromEntries(keys.map((k) => [k, 1]));
+  if (sum <= 0) sum = keys.length;
+  const exact = Object.fromEntries(keys.map((k) => [k, (Math.max(0, base[k]) * total) / sum]));
+  const out = Object.fromEntries(keys.map((k) => [k, Math.floor(exact[k])]));
+  let missing = total - keys.reduce((a, k) => a + out[k], 0);
+  keys
+    .slice()
+    .sort((a, b) => (exact[b] - out[b]) - (exact[a] - out[a]) || Number(a) - Number(b))
+    .slice(0, missing)
+    .forEach((k) => { out[k] += 1; });
+  return out;
+}
+
 function updateWeightSummary() {
-  const inputs = Array.from(document.querySelectorAll('.weight-input'));
-  const total = inputs.reduce((acc, el) => acc + Math.max(0, Math.min(100, parseInt(el.value || '0', 10) || 0)), 0);
+  const rows = readWeightInputs();
+  const total = rows.reduce((acc, r) => acc + r.value, 0);
   const badge = document.getElementById('weightsTotalBadge');
   const hint = document.getElementById('weightsHint');
   const btn = document.getElementById('saveWeightsBtn');
+  const fillBtn = document.getElementById('fillWeightsBtn');
+  const eqBtn = document.getElementById('equalWeightsBtn');
   if (!badge || !btn) return;
 
   badge.textContent = `${total}% / 100%`;
-  if (total === 100) {
-    badge.className = 'badge badge-ok';
-    if (hint) hint.style.display = 'none';
-    btn.disabled = false;
-  } else {
-    badge.className = 'badge badge-err';
-    if (hint) hint.style.display = 'inline';
-    btn.disabled = true;
+  const ok = total === 100;
+  badge.className = `badge ${ok ? 'badge-ok' : 'badge-err'}`;
+  if (hint) {
+    hint.style.display = ok || !rows.length ? 'none' : 'inline';
+    hint.textContent = total < 100 ? `Faltam ${100 - total}% para fechar 100%.` : `Passou ${total - 100}% de 100%.`;
   }
+  btn.disabled = !ok || !rows.length;
+  if (fillBtn) {
+    fillBtn.disabled = ok || !rows.length;
+    fillBtn.textContent = total > 100 ? 'Ajustar para 100%' : 'Preencher até 100%';
+  }
+  if (eqBtn) eqBtn.disabled = !rows.length;
+  renderWeightsBar(rows, total);
 }
 
-async function saveAllWeights() {
-  const inputs = Array.from(document.querySelectorAll('.weight-input'));
-  const weights = {};
-  for (const el of inputs) {
-    weights[el.getAttribute('data-channel-id')] = Math.max(0, Math.min(100, parseInt(el.value || '0', 10) || 0));
+function renderWeightsBar(rows, total) {
+  const bar = document.getElementById('weightsBar');
+  if (!bar) return;
+  const names = Object.fromEntries(destChannelsCache.map((c) => [String(c.id), c.name]));
+  const scale = Math.max(100, total);
+  bar.innerHTML = rows
+    .filter((r) => r.value > 0)
+    .map((r, i) => `<span class="weights-bar-seg seg-${i % 6}" style="width:${(r.value / scale) * 100}%" title="${esc(names[r.id] || '')}: ${r.value}%">${r.value >= 8 ? `${r.value}%` : ''}</span>`)
+    .join('');
+}
+
+async function rebalanceWeights(mode) {
+  const rows = readWeightInputs();
+  if (!rows.length) {
+    showToast('Nenhum canal ativo para receber peso.', 'error');
+    return;
   }
+  const shares = Object.fromEntries(rows.map((r) => [r.id, mode === 'equal' ? 1 : r.value]));
+  const next = largestRemainder(shares, 100);
+  rows.forEach((r) => { r.el.value = next[r.id]; });
+  updateWeightSummary();
+  await saveAllWeights(mode === 'equal' ? 'Peso dividido igualmente entre os canais ativos.' : 'Pesos completados até 100%.');
+}
+
+async function saveAllWeights(successMsg) {
+  const weights = {};
+  for (const r of readWeightInputs()) weights[r.id] = r.value;
+  if (!Object.keys(weights).length) return;
   try {
     const res = await fetch('/api/destination-channels/weights', {
       method: 'PUT',
@@ -1473,10 +1624,43 @@ async function saveAllWeights() {
       showToast(data.detail || 'Erro ao salvar pesos.', 'error');
       return;
     }
-    showToast('Distribuição de pesos salva (100%).', 'success');
+    showToast(typeof successMsg === 'string' ? successMsg : 'Distribuição de pesos salva (100%).', 'success');
     loadDestinations();
   } catch (e) {
     showToast('Erro de rede ao salvar pesos.', 'error');
+  }
+}
+
+/* Apagar pede um segundo toque no mesmo botão (sem janela de confirmação do navegador). */
+async function deleteDestination(channelId, btn) {
+  if (btn && btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Toque de novo para apagar';
+    btn.classList.add('armed');
+    clearTimeout(btn._disarm);
+    btn._disarm = setTimeout(() => {
+      btn.dataset.armed = '';
+      btn.textContent = 'Apagar conta';
+      btn.classList.remove('armed');
+    }, 4000);
+    return;
+  }
+  if (btn) { clearTimeout(btn._disarm); btn.disabled = true; }
+  try {
+    const res = await fetch(`/api/destination-channels/${channelId}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao apagar a conta.', 'error');
+      if (btn) btn.disabled = false;
+      return;
+    }
+    const extra = data.scheduled_posts_removed ? ` ${data.scheduled_posts_removed} agendamento(s) removido(s).` : '';
+    showToast(`Conta "${data.name}" apagada. Peso repartido entre os canais ativos.${extra}`, 'success');
+    loadDestinations();
+    fetchStatus();
+  } catch (e) {
+    showToast('Erro de rede ao apagar a conta.', 'error');
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -1484,7 +1668,10 @@ async function toggleDestination(channelId) {
   try {
     const res = await fetch(`/api/destination-channels/${channelId}/toggle`, { method: 'PATCH' });
     if (res.ok) {
-      showToast('Status da conta atualizado.', 'success');
+      const data = await res.json();
+      showToast(data.is_active
+        ? 'Canal reativado com o peso que tinha antes. Os outros foram reajustados.'
+        : 'Canal pausado. O peso dele foi repartido entre os canais ativos.', 'success');
       loadDestinations();
       fetchStatus();
     }
@@ -1887,6 +2074,7 @@ function applyOpusPreset(presetId) {
   if (document.getElementById('presetFontSize')) document.getElementById('presetFontSize').value = p.fontSize;
   if (document.getElementById('presetWordsPerLine')) document.getElementById('presetWordsPerLine').value = String(p.wordsPerLine);
   if (document.getElementById('presetUppercase')) document.getElementById('presetUppercase').checked = Boolean(p.upper);
+  if (document.getElementById('presetOutlineWidth')) document.getElementById('presetOutlineWidth').value = p.outlinePx ?? 6;
   if (document.getElementById('presetStyleMode')) {
     document.getElementById('presetStyleMode').value = p.borderStyle === 3
       ? 'box_caption'
@@ -2226,10 +2414,10 @@ async function fillActiveExperimentSlots() {
     const res = await fetch(`/api/experiments/${activeExperimentId}/fill`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apply_variants: true, include_analyzed: false }),
+      body: JSON.stringify({ apply_variants: true, include_analyzed: true }),
     });
     const data = await res.json();
-    showToast(`${data.newly_assigned || 0} novo(s) clipe(s) alocado(s) (${data.filled_slots}/${data.total_slots}).`, 'success');
+    showToast(`${data.newly_assigned || 0} novo(s) clipe(s) alocado(s) (${data.filled_slots}/${data.total_slots}). O worker renderiza os pendentes automaticamente.`, 'success');
     await loadExperimentsView();
   } catch (e) {
     showToast('Erro ao preencher slots do experimento.', 'error');
@@ -2339,6 +2527,34 @@ async function exportClipsBatchZip() {
   }
 }
 
+const WORDS_SOURCE_LABEL = {
+  custom: 'Editadas por você',
+  video_transcript: 'Transcrição do vídeo',
+  none: 'Sem transcrição',
+};
+
+function wordsSourceLabel(src, lang) {
+  let label = WORDS_SOURCE_LABEL[src] || (String(src || '').includes('whisper') ? 'Whisper automático' : (src || '—'));
+  if (lang && lang !== 'auto') label += ` · ${String(lang).toUpperCase()}`;
+  return label;
+}
+
+function renderWordsEditorList() {
+  const listEl = document.getElementById('wordsEditorList');
+  if (!listEl) return;
+  if (!wordsEditorBuffer.length) {
+    listEl.innerHTML = '<div class="empty-state">Nenhuma palavra transcrita nesta janela ainda. Clique em "Transcrever de novo" ou renderize o clipe (a transcrição é automática no render).</div>';
+  } else {
+    listEl.innerHTML = wordsEditorBuffer.map((w, i) => `
+      <div style="display:flex; flex-direction:column; gap:2px; background:#141418; border:1px solid #26262e; border-radius:8px; padding:6px;">
+        <input type="text" class="input" style="width:110px; max-width:100%; padding:4px 6px; font-size:12px;" value="${esc(w.word)}" oninput="wordsEditorBuffer[${i}].word = this.value">
+        <span style="font-size:10px; color:var(--text-muted); font-family:'JetBrains Mono',monospace;">${Number(w.start).toFixed(1)}s</span>
+      </div>
+    `).join('');
+  }
+  setText('wordsEditorTitle', `Legendas Palavra por Palavra — Clipe #${wordsEditorClipId} (${wordsEditorBuffer.length} palavras)`);
+}
+
 async function openWordsEditorForEditClip() {
   const clipId = Number(document.getElementById('editClipId')?.value || 0);
   if (!clipId) return;
@@ -2347,23 +2563,40 @@ async function openWordsEditorForEditClip() {
     const res = await fetch(`/api/clips/${clipId}/words`);
     const data = await res.json();
     wordsEditorBuffer = Array.isArray(data.words) ? data.words : [];
-    const listEl = document.getElementById('wordsEditorList');
-    if (listEl) {
-      if (!wordsEditorBuffer.length) {
-        listEl.innerHTML = '<div class="empty-state">Nenhuma palavra transcrita encontrada nesta janela do clipe.</div>';
-      } else {
-        listEl.innerHTML = wordsEditorBuffer.map((w, i) => `
-          <div style="display:flex; flex-direction:column; gap:2px; background:#141418; border:1px solid #26262e; border-radius:8px; padding:6px;">
-            <input type="text" class="input" style="width:110px; padding:4px 6px; font-size:12px;" value="${esc(w.word)}" oninput="wordsEditorBuffer[${i}].word = this.value">
-            <span style="font-size:10px; color:var(--text-muted); font-family:'JetBrains Mono',monospace;">${Number(w.start).toFixed(1)}s</span>
-          </div>
-        `).join('');
-      }
-    }
-    setText('wordsEditorTitle', `Legendas Palavra por Palavra — Clipe #${clipId} (${wordsEditorBuffer.length} palavras)`);
+    setText('wordsEditorSource', wordsSourceLabel(data.source, data.language));
+    const langSel = document.getElementById('wordsEditorLanguage');
+    if (langSel) langSel.value = '';
+    renderWordsEditorList();
     openModal('wordsEditorModal');
   } catch (e) {
     showToast('Erro ao carregar palavras do clipe.', 'error');
+  }
+}
+
+async function retranscribeWordsEditor() {
+  if (!wordsEditorClipId) return;
+  const btn = document.getElementById('wordsRetranscribeBtn');
+  const language = document.getElementById('wordsEditorLanguage')?.value || '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Transcrevendo...'; }
+  try {
+    const res = await fetch(`/api/clips/${wordsEditorClipId}/transcribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(language ? { language } : {}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Não consegui transcrever o clipe.', 'error');
+      return;
+    }
+    wordsEditorBuffer = Array.isArray(data.words) ? data.words : [];
+    setText('wordsEditorSource', wordsSourceLabel(data.source, data.language));
+    renderWordsEditorList();
+    showToast(`${wordsEditorBuffer.length} palavras transcritas. Revise e clique em salvar para usar no vídeo.`, 'success');
+  } catch (e) {
+    showToast('Erro de rede ao transcrever.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Transcrever de novo'; }
   }
 }
 

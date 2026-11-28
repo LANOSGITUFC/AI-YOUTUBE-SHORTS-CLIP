@@ -572,11 +572,33 @@
                 <div class="field">
                   <label for="presetStyleMode">Animação da legenda</label>
                   <select id="presetStyleMode" class="select" onchange="updatePresetPreview()">
+                    <option value="word_reveal">Palavra por palavra (aparecem uma a uma)</option>
+                    <option value="single_word">Uma palavra por vez (grande)</option>
                     <option value="word_highlight">Destaque palavra ativa (OpusClip)</option>
                     <option value="karaoke_pop">Destaque + Pop de escala (CapCut)</option>
                     <option value="box_caption">Caixa escura legível</option>
                     <option value="clean_minimal">Minimalista limpa</option>
                   </select>
+                </div>
+              </div>
+
+              <div class="transcribe-status" id="transcribeStatus" role="status">
+                <span class="transcribe-dot" id="transcribeDot"></span>
+                <span id="transcribeStatusText">Verificando motor de transcrição...</span>
+              </div>
+
+              <div class="form-grid-2">
+                <div class="field">
+                  <label for="presetLanguage">Idioma da fala (transcrição)</label>
+                  <select id="presetLanguage" class="select" onchange="updatePresetPreview()">
+                    <option value="auto">Automático (detecta sozinho)</option>
+                    <option value="pt">Português</option>
+                    <option value="en">English</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="presetOutlineWidth">Espessura do contorno (<span id="outlineWidthVal">6</span>px)</label>
+                  <input id="presetOutlineWidth" type="range" min="0" max="12" value="6" oninput="updatePresetPreview()">
                 </div>
               </div>
 
@@ -626,8 +648,13 @@
                   <label for="presetFontName">Fonte do sistema</label>
                   <select id="presetFontName" class="select" onchange="updatePresetPreview()">
                     <option value="auto">Automática (melhor fonte instalada)</option>
+                    <option value="Montserrat">Montserrat</option>
+                    <option value="Inter">Inter</option>
+                    <option value="Roboto">Roboto</option>
+                    <option value="Noto Sans">Noto Sans</option>
                     <option value="DejaVu Sans">DejaVu Sans</option>
                     <option value="Liberation Sans">Liberation Sans</option>
+                    <option value="Impact">Impact</option>
                     <option value="Arial">Arial (Windows)</option>
                   </select>
                 </div>
@@ -655,12 +682,10 @@
                 <div class="phone-watermark" id="previewWatermark"></div>
                 <div class="phone-half-top" id="previewTopZone">FACECAM (TOPO)</div>
                 <div class="phone-half-bottom" id="previewBottomZone">GAMEPLAY (BASE)</div>
-                <div class="phone-subtitle-preview" id="previewSubtitle">
-                  OLHA <span id="previewActiveWord">ESSE</span> CLUTCH
-                </div>
+                <div class="phone-subtitle-preview" id="previewSubtitle" aria-live="off"></div>
               </div>
               <span style="font-size:11.5px; color:var(--text-secondary); text-align:center;">
-                O destaque alterna palavra por palavra sincronizado com a fala real.
+                Prévia animada: no vídeo, cada palavra acompanha o tempo exato da fala (transcrição automática).
               </span>
             </div>
           </div>
@@ -671,8 +696,8 @@
                 <strong style="font-size:13.5px;">Brand Kits (Identidade Visual Reutilizável)</strong>
                 <div style="font-size:12px; color:var(--text-muted);">Salve o estilo atual acima como um Brand Kit para aplicar em 1 clique em qualquer clipe ou canal.</div>
               </div>
-              <div style="display:flex; gap:8px; align-items:center;">
-                <input id="newBrandKitName" type="text" class="input" style="width:210px; height:32px; padding:4px 10px;" placeholder="Nome do Brand Kit...">
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; min-width:0; max-width:100%;">
+                <input id="newBrandKitName" type="text" class="input" style="width:210px; max-width:100%; flex:1 1 160px; height:32px; padding:4px 10px;" placeholder="Nome do Brand Kit...">
                 <button class="btn btn-primary btn-sm" onclick="createBrandKitFromCurrent()">+ Salvar como Brand Kit</button>
               </div>
             </div>
@@ -728,15 +753,21 @@
             <span>Arquivo <code>client_secret*.json</code> não encontrado na raiz do projeto. Baixe as credenciais OAuth 2.0 no Google Cloud Console e salve na raiz para conectar contas reais.</span>
           </div>
 
-          <div id="weightsSummaryBar" class="panel" style="display:none; margin-bottom:16px; padding:12px 16px;">
-            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px;">
-              <div style="display:flex; align-items:center; gap:10px;">
-                <span style="font-size:12.5px; color:var(--text-secondary);">Soma dos pesos de distribuição:</span>
+          <div id="weightsSummaryBar" class="panel weights-panel" style="display:none;">
+            <div class="weights-panel-row">
+              <div class="weights-total">
+                <span class="weights-label">Soma dos canais ativos:</span>
                 <span id="weightsTotalBadge" class="badge badge-ok">100% / 100%</span>
-                <span id="weightsHint" style="font-size:12px; color:var(--text-muted); display:none;">A soma dos canais deve fechar exatamente em 100%.</span>
+                <span id="weightsHint" class="weights-hint" style="display:none;"></span>
               </div>
-              <button id="saveWeightsBtn" class="btn btn-primary btn-sm" onclick="saveAllWeights()">Salvar pesos (%)</button>
+              <div class="weights-actions">
+                <button id="fillWeightsBtn" class="btn btn-sm" onclick="rebalanceWeights('fill')" title="Reparte o que falta (ou o que sobra) na proporção dos pesos atuais">Preencher até 100%</button>
+                <button id="equalWeightsBtn" class="btn btn-sm" onclick="rebalanceWeights('equal')" title="Mesmo peso para todos os canais ativos">Dividir igualmente</button>
+                <button id="saveWeightsBtn" class="btn btn-primary btn-sm" onclick="saveAllWeights()">Salvar pesos (%)</button>
+              </div>
             </div>
+            <div id="weightsBar" class="weights-bar" aria-hidden="true"></div>
+            <p class="weights-note">Canal pausado fica com 0% e o peso dele vai para os ativos. Ao reativar, ele recebe de volta o peso que tinha.</p>
           </div>
 
           <div id="destinationsList" class="cards-grid-2"></div>
@@ -1025,6 +1056,16 @@
       </div>
       <div class="modal-body" style="max-height:60vh; overflow-y:auto;">
         <p class="section-desc" style="margin-bottom:10px;">Corrija nomes próprios, gírias ou erros de transcrição mantendo o timestamp exato de cada palavra.</p>
+        <div class="words-toolbar">
+          <span class="badge" id="wordsEditorSource">—</span>
+          <select id="wordsEditorLanguage" class="select" aria-label="Idioma da fala">
+            <option value="">Idioma do estúdio</option>
+            <option value="auto">Automático</option>
+            <option value="pt">Português</option>
+            <option value="en">English</option>
+          </select>
+          <button type="button" class="btn btn-sm" id="wordsRetranscribeBtn" onclick="retranscribeWordsEditor()">Transcrever de novo</button>
+        </div>
         <div id="wordsEditorList" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
       </div>
       <div class="modal-foot">

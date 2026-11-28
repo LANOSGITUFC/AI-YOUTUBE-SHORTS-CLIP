@@ -148,6 +148,7 @@ class DestinationChannel(Base):
     oauth_credentials_path = Column(String(500), nullable=True)
     daily_post_limit = Column(Integer, default=4) # 4 videos per day
     weight = Column(Integer, default=100, nullable=False) # Porcentagem de distribuição (0 a 100%, soma total = 100%)
+    paused_weight = Column(Integer, nullable=True) # Peso guardado enquanto o canal está pausado (devolvido ao reativar)
     posting_times = Column(String(200), default='["11:30", "15:00", "18:30", "21:00"]') # 4 daily slots (BRT)
     affiliate_comment = Column(Text, default="🔥 Gostou do corte? Inscreva-se para mais clips diários! Link na bio para produtos gamers.")
     default_tags = Column(String(500), default="#shorts,#gaming,#viral,#clips,#humor")

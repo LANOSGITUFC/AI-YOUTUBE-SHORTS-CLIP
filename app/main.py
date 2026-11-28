@@ -30,10 +30,14 @@ from app.services.deduplicator import DeduplicationEngine
 from app.services.downloader import VideoDownloader, extract_youtube_video_id, COOKIES_FILE
 from app.services.editor import VideoEditor
 from app.services.subtitles import OPUS_CAPTION_PRESETS
+from app.services.transcriber import (
+    WhisperTranscriber, resolve_clip_words, get_caption_language, normalize_language, SUPPORTED_LANGUAGES,
+)
 from app.services.scheduler import PostScheduler
 from app.services.experiments import ChannelExperimentEngine, get_experiment_catalog
 from app.services.priority import ranked_channels
 from app.services.moment_detector import MomentDetector, get_job_state as get_moment_job_state
+from app.services import dest_weights
 from app.services.pipeline_worker import PipelineWorker
 from app.services.render_guard import RenderBusyError
 from app.services.auth_youtube import YouTubeAuthManager, get_client_secrets_path
@@ -929,29 +933,21 @@ def _parse_editor_config(raw: Optional[str]) -> Dict[str, Any]:
 
 
 def _load_clip_words(clip: ClipSegment) -> list:
-    ed_cfg = _parse_editor_config(clip.editor_config_json)
-    if isinstance(ed_cfg.get("custom_words"), list) and ed_cfg["custom_words"]:
-        return ed_cfg["custom_words"]
-    if not clip.video or not clip.video.transcript_path or not os.path.exists(clip.video.transcript_path):
-        return []
+    """Palavras da legenda do clipe (editadas > vídeo > cache da transcrição automática da janela)."""
     try:
-        with open(clip.video.transcript_path, "r", encoding="utf-8") as f:
-            t_data = json.load(f)
-        out = []
-        for seg in t_data.get("segments", []):
-            for w in seg.get("words", []):
-                ws = float(w.get("start", 0))
-                we = float(w.get("end", ws + 0.25))
-                if we >= float(clip.start_time) and ws <= float(clip.end_time) + 0.35:
-                    out.append({
-                        "word": str(w.get("word") or w.get("text") or "").strip(),
-                        "start": round(ws, 2),
-                        "end": round(we, 2),
-                        "emoji": str(w.get("emoji") or ""),
-                    })
-        return out
+        with SessionLocal() as sdb:
+            words, _src, _lang = resolve_clip_words(sdb, clip, auto_transcribe=False)
     except Exception:
         return []
+    return [
+        {
+            "word": str(w.get("word") or w.get("text") or "").strip(),
+            "start": round(float(w.get("start", 0)), 2),
+            "end": round(float(w.get("end", 0)), 2),
+            "emoji": str(w.get("emoji") or ""),
+        }
+        for w in words
+    ]
 
 
 def _serialize_clip(c: ClipSegment, include_words: bool = False) -> Dict[str, Any]:
@@ -1795,8 +1791,72 @@ def list_destination_channels(db: Session = Depends(get_db)):
             "default_tags": c.default_tags or "",
             "scheduled_count": scheduled_posts_count,
             "is_active": bool(c.is_active),
+            "paused_weight": c.paused_weight,
         })
     return out
+
+
+def _weights_snapshot(db: Session) -> Dict[str, Any]:
+    rows = db.query(DestinationChannel).order_by(DestinationChannel.id.asc()).all()
+    return {
+        "weights": {str(r.id): int(r.weight or 0) for r in rows},
+        "active_total": sum(int(r.weight or 0) for r in rows if r.is_active),
+    }
+
+
+@app.post("/api/destination-channels/weights/fill")
+def fill_destination_weights(db: Session = Depends(get_db)):
+    """Completa o que falta para 100% entre os canais ativos, na proporção dos pesos atuais."""
+    if not dest_weights.fill_to_100(db):
+        raise HTTPException(status_code=400, detail="Nenhum canal ativo para receber peso.")
+    db.commit()
+    return {"success": True, **_weights_snapshot(db)}
+
+
+@app.post("/api/destination-channels/weights/equal")
+def split_destination_weights_equally(db: Session = Depends(get_db)):
+    """Divide 100% igualmente entre os canais ativos (sobra do arredondamento vai para os primeiros)."""
+    if not dest_weights.split_equally(db):
+        raise HTTPException(status_code=400, detail="Nenhum canal ativo para dividir o peso.")
+    db.commit()
+    return {"success": True, **_weights_snapshot(db)}
+
+
+@app.delete("/api/destination-channels/{channel_id}")
+def delete_destination_channel(channel_id: int, db: Session = Depends(get_db)):
+    """
+    Remove a conta do sistema: apaga os agendamentos e experimentos dela, devolve o peso aos
+    outros canais ativos e tira o token OAuth de data/tokens (movido para data/tokens/removidos/,
+    senão a recuperação automática de tokens recriaria a conta no próximo início).
+    """
+    ch = db.query(DestinationChannel).filter(DestinationChannel.id == channel_id).first()
+    if not ch:
+        raise HTTPException(status_code=404, detail="Canal de destino não encontrado.")
+
+    name = ch.name
+    token_moved_to = None
+    token_path = ch.oauth_credentials_path
+    if token_path and os.path.isfile(token_path):
+        removed_dir = os.path.join(os.path.dirname(os.path.abspath(token_path)), "removidos")
+        os.makedirs(removed_dir, exist_ok=True)
+        dest = os.path.join(removed_dir, f"{uuid.uuid4().hex[:8]}_{os.path.basename(token_path)}")
+        shutil.move(token_path, dest)
+        token_moved_to = dest
+
+    posts_removed = db.query(ScheduledPost).filter(ScheduledPost.destination_channel_id == channel_id).delete(synchronize_session=False)
+    db.query(ChannelExperiment).filter(ChannelExperiment.destination_channel_id == channel_id).delete(synchronize_session=False)
+    db.delete(ch)
+    db.flush()
+    dest_weights.release_weight_of_removed(db, channel_id)
+    db.commit()
+    return {
+        "success": True,
+        "id": channel_id,
+        "name": name,
+        "scheduled_posts_removed": posts_removed,
+        "token_moved_to": token_moved_to,
+        **_weights_snapshot(db),
+    }
 
 
 @app.put("/api/destination-channels/weights")
@@ -1852,9 +1912,13 @@ def toggle_destination_channel(channel_id: int, db: Session = Depends(get_db)):
     ch = db.query(DestinationChannel).filter(DestinationChannel.id == channel_id).first()
     if not ch:
         raise HTTPException(status_code=404, detail="Canal de destino não encontrado.")
-    ch.is_active = not bool(ch.is_active)
+    # Pausar reparte o peso entre os ativos; reativar devolve o peso guardado e reajusta os outros.
+    if ch.is_active:
+        dest_weights.pause_channel(db, ch)
+    else:
+        dest_weights.resume_channel(db, ch)
     db.commit()
-    return {"id": ch.id, "is_active": ch.is_active}
+    return {"id": ch.id, "is_active": ch.is_active, **_weights_snapshot(db)}
 
 
 @app.get("/api/auth/youtube/login")
@@ -2088,7 +2152,8 @@ def update_settings(payload: Dict[str, Any], db: Session = Depends(get_db)):
 
     allowed_simple = {
         "AI_PROVIDER", "WHISPER_MODEL", "CROP_MODE", "MAX_CLIP_DURATION", "MIN_CLIP_DURATION",
-        "AUTO_SCHEDULE", "TIMEZONE", "YT_COOKIES_BROWSER", "MOMENTS_AUTO_CLIP", "MOMENTS_VISUAL_MODE",
+        "AUTO_SCHEDULE", "TIMEZONE", "YT_COOKIES_BROWSER", "CAPTION_LANGUAGE", "TRANSCRIBE_MAX_MINUTES",
+        "MOMENTS_AUTO_CLIP", "MOMENTS_VISUAL_MODE",
         "GEMINI_MODEL", "GROQ_MODEL", "OPENAI_MODEL", "CLAUDE_MODEL", "OLLAMA_URL", "OLLAMA_MODEL",
     }
 
@@ -2359,32 +2424,59 @@ def get_clip_words(clip_id: int, db: Session = Depends(get_db)):
     clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
     if not clip:
         raise HTTPException(status_code=404, detail="Clipe não encontrado.")
-    try:
-        ed_cfg = json.loads(clip.editor_config_json) if clip.editor_config_json else {}
-    except Exception:
-        ed_cfg = {}
+    words, source, lang = resolve_clip_words(db, clip, auto_transcribe=False)
+    return {
+        "clip_id": clip.id,
+        "source": source,
+        "language": lang or "auto",
+        "words": [
+            {k: v for k, v in {
+                "word": str(w.get("word") or "").strip(),
+                "start": round(float(w.get("start", 0)), 3),
+                "end": round(float(w.get("end", 0)), 3),
+                "emoji": w.get("emoji") or None,
+            }.items() if v is not None}
+            for w in words
+        ],
+    }
 
-    if isinstance(ed_cfg.get("custom_words"), list) and ed_cfg["custom_words"]:
-        return {"clip_id": clip.id, "source": "custom", "words": ed_cfg["custom_words"]}
 
-    words = []
-    if clip.video and clip.video.transcript_path and os.path.exists(clip.video.transcript_path):
-        try:
-            with open(clip.video.transcript_path, "r", encoding="utf-8") as f:
-                t_data = json.load(f)
-            for seg in t_data.get("segments", []):
-                for w in seg.get("words", []):
-                    ws = float(w.get("start", 0))
-                    we = float(w.get("end", 0))
-                    if we >= clip.start_time and ws <= clip.end_time:
-                        words.append({
-                            "word": str(w.get("word") or "").strip(),
-                            "start": round(ws, 3),
-                            "end": round(we, 3),
-                        })
-        except Exception:
-            pass
-    return {"clip_id": clip.id, "source": "transcript", "words": words}
+@app.post("/api/clips/{clip_id}/transcribe")
+def transcribe_clip_now(clip_id: int, payload: Optional[Dict[str, Any]] = None, db: Session = Depends(get_db)):
+    """
+    Transcreve de novo só a janela do clipe com Whisper (Groq/OpenAI/local), no idioma pedido.
+    Não apaga as palavras editadas: devolve a transcrição nova para o editor de palavras revisar e salvar.
+    """
+    clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
+    if not clip or not clip.video:
+        raise HTTPException(status_code=404, detail="Clipe não encontrado.")
+    payload = payload or {}
+    transcriber = WhisperTranscriber(db)
+    status = transcriber.engines_status()
+    if not status["any"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Nenhum motor de transcrição disponível. Coloque a chave grátis da Groq (GROQ_API_KEY) em Configurações.",
+        )
+    lang = payload.get("language")
+    lang = get_caption_language(db, _parse_editor_config(clip.editor_config_json)) if not lang else normalize_language(lang)
+    res = transcriber.transcribe_window(clip.video, float(clip.start_time), float(clip.end_time), language=lang, force=True)
+    if res.get("source") == "no_audio":
+        raise HTTPException(status_code=400, detail="O áudio deste vídeo não está no disco. Baixe ou restaure o vídeo primeiro.")
+    return {
+        "clip_id": clip.id,
+        "source": res.get("source"),
+        "language": res.get("language") or "auto",
+        "words": res.get("words", []),
+    }
+
+
+@app.get("/api/transcription/status")
+def transcription_status(db: Session = Depends(get_db)):
+    """Quais motores de transcrição estão prontos e qual idioma de legenda está configurado."""
+    status = WhisperTranscriber(db).engines_status()
+    status["languages"] = SUPPORTED_LANGUAGES
+    return status
 
 
 @app.put("/api/clips/{clip_id}/words")

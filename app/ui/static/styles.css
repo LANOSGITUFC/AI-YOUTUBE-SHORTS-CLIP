@@ -783,7 +783,7 @@ button, input, select, textarea {
 
 .split-queue {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(0, 1.7fr) minmax(min(300px, 100%), 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -1048,8 +1048,9 @@ button, input, select, textarea {
 }
 
 .phone-frame {
-  width: 270px;
-  height: 480px;
+  width: min(270px, 100%);
+  aspect-ratio: 9 / 16;
+  height: auto;
   border-radius: 14px;
   border: 2px solid var(--border-strong);
   background: #0d1017;
@@ -1103,7 +1104,77 @@ button, input, select, textarea {
   font-weight: 800;
   line-height: 1.15;
   pointer-events: none;
-  transition: all 0.15s ease;
+  transition: bottom 0.15s ease, font-size 0.15s ease;
+  overflow-wrap: anywhere;
+}
+
+.phone-subtitle-preview .cap-word {
+  display: inline-block;
+  margin: 0 0.12em;
+  transform-origin: 50% 70%;
+}
+
+.phone-subtitle-preview .cap-word.is-active.pop {
+  animation: capPop 0.17s ease-out both;
+}
+
+@keyframes capPop {
+  0% { transform: scale(0.78); }
+  55% { transform: scale(1.16); }
+  100% { transform: scale(1.06); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phone-subtitle-preview .cap-word.is-active.pop { animation: none; }
+}
+
+.transcribe-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 8px 10px;
+  line-height: 1.35;
+}
+
+.transcribe-status > span:last-child {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.transcribe-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.transcribe-dot.ok { background: #22c55e; }
+.transcribe-dot.warn { background: #f59e0b; }
+
+.words-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.words-toolbar .select {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 150px;
+  max-width: 220px;
+}
+
+@media (max-width: 480px) {
+  .words-toolbar .select,
+  .words-toolbar .btn { flex: 1 1 100%; max-width: none; }
 }
 
 /* ==========================================
@@ -1112,13 +1183,13 @@ button, input, select, textarea {
 
 .cards-grid-3 {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   gap: 14px;
 }
 
 .cards-grid-2 {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr));
   gap: 14px;
 }
 
@@ -1454,7 +1525,7 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
 
 .exp-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   gap: 12px;
 }
 
@@ -1615,4 +1686,64 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   border-top: 1px dashed #26262e;
   font-size: 11px;
   color: var(--text-muted, #a1a1aa);
+}
+
+
+/* ==========================================
+   PESOS DOS CANAIS DE DESTINO (celular → TV)
+   ========================================== */
+.weights-panel { margin-bottom: 16px; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.weights-panel-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; }
+.weights-total { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.weights-label { font-size: 12.5px; color: var(--text-secondary); }
+.weights-hint { font-size: 12px; color: var(--text-muted); }
+.weights-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.weights-note { margin: 0; font-size: 11.5px; color: var(--text-muted); }
+.weights-bar { display: flex; height: 18px; border-radius: 6px; overflow: hidden; background: var(--bg-input); border: 1px solid var(--border-subtle); }
+.weights-bar:empty { display: none; }
+.weights-bar-seg {
+  display: flex; align-items: center; justify-content: center; min-width: 0; overflow: hidden;
+  font-size: 10.5px; font-weight: 600; color: #111; white-space: nowrap; transition: width .2s;
+}
+.weights-bar-seg + .weights-bar-seg { border-left: 1px solid rgba(0,0,0,.35); }
+.weights-bar-seg.seg-0 { background: #e5484d; }
+.weights-bar-seg.seg-1 { background: #f5a524; }
+.weights-bar-seg.seg-2 { background: #46a758; }
+.weights-bar-seg.seg-3 { background: #3e9ef5; }
+.weights-bar-seg.seg-4 { background: #a875f0; }
+.weights-bar-seg.seg-5 { background: #12a594; }
+
+.dest-name { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.dest-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; overflow-wrap: anywhere; }
+.dest-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex-shrink: 0; }
+.dest-stats { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; font-size: 12px; color: var(--text-secondary); }
+.dest-stats strong { color: var(--text-primary); }
+.dest-weight { display: flex; align-items: center; gap: 6px; }
+.dest-weight .weight-input { width: 68px; padding: 4px 6px; text-align: center; }
+.dest-weight-kept { color: var(--text-primary); }
+.dest-weight-kept small { color: var(--text-muted); font-size: 11px; }
+/* Pausado: card apagado, mas os botões continuam legíveis para reativar/apagar */
+.channel-card.paused { opacity: 1; }
+.channel-card.paused .channel-card-head,
+.channel-card.paused .dest-stats { opacity: .62; }
+.btn.armed { background: var(--accent); color: #fff; border-color: transparent; }
+
+/* Celular: botões ocupam a linha inteira e ficam fáceis de tocar */
+@media (max-width: 640px) {
+  .weights-actions { width: 100%; }
+  .weights-actions .btn { flex: 1 1 calc(50% - 8px); justify-content: center; min-height: 40px; }
+  .weights-actions #saveWeightsBtn { flex-basis: 100%; }
+  .dest-card .channel-card-foot .btn { flex: 1 1 calc(50% - 8px); justify-content: center; text-align: center; min-height: 40px; }
+  .dest-card .channel-card-foot .btn-danger { flex-basis: 100%; }
+  .dest-weight .weight-input { width: 76px; min-height: 36px; font-size: 16px; }
+}
+
+/* TV / telas grandes: letra e alvos maiores para ler de longe */
+@media (min-width: 1800px) {
+  .weights-label, .weights-hint, .dest-stats { font-size: 14px; }
+  .weights-note { font-size: 13px; }
+  .dest-name { font-size: 16px; }
+  .weights-bar { height: 24px; }
+  .weights-bar-seg { font-size: 12px; }
+  .dest-weight .weight-input { width: 84px; font-size: 15px; }
 }

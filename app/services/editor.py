@@ -21,6 +21,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from sqlalchemy.orm import Session
 from app.database.models import ClipSegment, SourceVideo, SystemSetting, BrandKit
 from app.services.subtitles import SubtitleEngine, DEFAULT_SUBTITLE_STYLE
+from app.services.transcriber import resolve_clip_words
 from app.services.facecam_detector import FacecamDetector
 from app.services.layout_engine import normalize_layout, build_custom_layout_filter, caption_style_overrides
 from app.services.effects import VideoEffectsEngine
@@ -309,18 +310,17 @@ class VideoEditor:
         tmp_clip_path = os.path.abspath(os.path.join(CLIPS_DIR, f"clip_{clip_id}.tmp.{render_nonce}.mp4"))
         tmp_thumb_path = os.path.abspath(os.path.join(THUMBNAILS_DIR, f"thumb_{clip_id}.tmp.{render_nonce}.jpg"))
 
-        # 1. Palavras da transcrição (prioriza palavras editadas/com AI Emojis do editor)
-        words_data = []
-        if isinstance(ed_cfg.get("custom_words"), list) and ed_cfg["custom_words"]:
-            words_data = ed_cfg["custom_words"]
-        elif video.transcript_path and os.path.exists(video.transcript_path):
+        # 1. Palavras da legenda: editadas no painel > transcrição do vídeo > transcrição automática
+        # só da janela do clipe (Whisper), feita aqui mesmo quando o vídeo não tem fala transcrita no trecho.
+        words_data: List[Dict[str, Any]] = []
+        transcript_source = "none"
+        if use_subtitles:
             try:
-                with open(video.transcript_path, "r", encoding="utf-8") as f:
-                    t_data = json.load(f)
-                    for seg in t_data.get("segments", []):
-                        words_data.extend(seg.get("words", []))
+                words_data, transcript_source, _lang = resolve_clip_words(self.db, clip, auto_transcribe=True)
             except Exception as exc:
-                logger.warning("Falha ao ler transcrição %s: %s", video.transcript_path, exc)
+                logger.warning("Falha ao obter palavras do clipe #%s: %s", clip_id, exc)
+                words_data = []
+            logger.info("Clipe #%s: %d palavras para legenda (origem: %s)", clip_id, len(words_data), transcript_source)
 
         has_audio = self._has_audio_stream(video.video_path)
 
@@ -547,7 +547,8 @@ class VideoEditor:
         rel_thumb_path = os.path.join(THUMBNAILS_DIR, f"thumb_{clip_id}.jpg")
         clip.clip_path = rel_clip_path
         clip.thumbnail_path = rel_thumb_path if os.path.exists(thumbnail_output_path) else None
-        clip.status = "rendered"
+        if clip.status not in ("scheduled", "published"):
+            clip.status = "rendered"
         self.db.commit()
 
         return {
@@ -559,6 +560,8 @@ class VideoEditor:
             "file_size_bytes": os.path.getsize(clip_output_path),
             "status": "rendered",
             "subtitles_applied": use_subtitles,
+            "subtitle_words": len(words_data),
+            "transcript_source": transcript_source,
             "silences_removed": bool(kept_intervals),
         }
 
