@@ -666,15 +666,21 @@
             <span>Arquivo <code>client_secret*.json</code> não encontrado na raiz do projeto. Baixe as credenciais OAuth 2.0 no Google Cloud Console e salve na raiz para conectar contas reais.</span>
           </div>
 
-          <div id="weightsSummaryBar" class="panel" style="display:none; margin-bottom:16px; padding:12px 16px;">
-            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px;">
-              <div style="display:flex; align-items:center; gap:10px;">
-                <span style="font-size:12.5px; color:var(--text-secondary);">Soma dos pesos de distribuição:</span>
+          <div id="weightsSummaryBar" class="panel weights-panel" style="display:none;">
+            <div class="weights-panel-row">
+              <div class="weights-total">
+                <span class="weights-label">Soma dos canais ativos:</span>
                 <span id="weightsTotalBadge" class="badge badge-ok">100% / 100%</span>
-                <span id="weightsHint" style="font-size:12px; color:var(--text-muted); display:none;">A soma dos canais deve fechar exatamente em 100%.</span>
+                <span id="weightsHint" class="weights-hint" style="display:none;"></span>
               </div>
-              <button id="saveWeightsBtn" class="btn btn-primary btn-sm" onclick="saveAllWeights()">Salvar pesos (%)</button>
+              <div class="weights-actions">
+                <button id="fillWeightsBtn" class="btn btn-sm" onclick="rebalanceWeights('fill')" title="Reparte o que falta (ou o que sobra) na proporção dos pesos atuais">Preencher até 100%</button>
+                <button id="equalWeightsBtn" class="btn btn-sm" onclick="rebalanceWeights('equal')" title="Mesmo peso para todos os canais ativos">Dividir igualmente</button>
+                <button id="saveWeightsBtn" class="btn btn-primary btn-sm" onclick="saveAllWeights()">Salvar pesos (%)</button>
+              </div>
             </div>
+            <div id="weightsBar" class="weights-bar" aria-hidden="true"></div>
+            <p class="weights-note">Canal pausado fica com 0% e o peso dele vai para os ativos. Ao reativar, ele recebe de volta o peso que tinha.</p>
           </div>
 
           <div id="destinationsList" class="cards-grid-2"></div>
