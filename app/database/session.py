@@ -17,13 +17,12 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+REMOVED_DEFAULT_CHANNEL_IDS = (
+    "UC9EU2jsdtQogOhMaLqVFcMQ",  # Lucas A.R.T. CORTES
+    "UCK4vuzS4fX8qxWi5Ik7XQYA",  # Davy Jones GTA 6
+)
+
 DEFAULT_CHANNELS = [
-    {
-        "name": "Lucas A.R.T. CORTES",
-        "handle": "@7mz_lucasart",
-        "channel_id": "UC9EU2jsdtQogOhMaLqVFcMQ",
-        "url": "https://www.youtube.com/@7mz_lucasart",
-    },
     {
         "name": "LipaoGamer",
         "handle": "@LipaoGamer",
@@ -47,12 +46,6 @@ DEFAULT_CHANNELS = [
         "handle": "@alanzoka",
         "channel_id": "UCIwspRtKNszHhIhl36gREjQ",
         "url": "https://www.youtube.com/@alanzoka",
-    },
-    {
-        "name": "Davy Jones GTA 6",
-        "handle": "@DavyJonesGTA6",
-        "channel_id": "UCK4vuzS4fX8qxWi5Ik7XQYA",
-        "url": "https://www.youtube.com/@DavyJonesGTA6",
     },
     {
         "name": "Games EduUu",
@@ -150,6 +143,12 @@ def init_db():
                     watermark_opacity=0.65,
                 ),
             ])
+
+        # Remove canais removidos do catálogo padrão (Lucas A.R.T. e Davy Jones)
+        for old_cid in REMOVED_DEFAULT_CHANNEL_IDS:
+            old_ch = db.query(SourceChannel).filter(SourceChannel.channel_id == old_cid).first()
+            if old_ch:
+                db.delete(old_ch)
 
         # Seed Source Channels
         for ch in DEFAULT_CHANNELS:

@@ -2445,7 +2445,10 @@ async function loadAnalyticsAndStorageView() {
           <input id="gdriveFolderInput" type="text" class="input" style="flex:1; min-width:180px;" placeholder="Cole o link ou ID da pasta no Google Drive" value="${esc(st.drive_folder_id || '')}">
           <button class="btn btn-secondary btn-sm" onclick="saveDriveConfig()">Salvar pasta</button>
         </div>
-        <div class="exp-metrics-row"><span>Lives em disco local: <strong>${st.raw_files_count || 0}</strong> (${st.raw_size_mb || 0} MB)</span><span>Clipes 9:16: <strong>${st.clips_size_mb || 0} MB</strong></span></div>
+        <div class="exp-metrics-row">
+          <span>Lives em disco local: <strong>${st.raw_files_count || 0}</strong> (${st.raw_size_mb || 0} MB) • Clipes: <strong>${st.clips_size_mb || 0} MB</strong></span>
+          <button class="btn btn-danger btn-sm" id="btnCleanMedia" onclick="cleanVideosAndClipsOnly()" title="Apaga apenas vídeos/clipes locais e do banco. Mantém contas, APIs, Drive e configurações intactos.">Limpar vídeos e clipes</button>
+        </div>
         ${archivable.length ? `<div style="margin-top:8px; font-size:11.5px; font-weight:600; color:var(--text-muted);">Lives locais prontas para arquivar no Drive:</div>` + archivable.slice(0, 8).map((v) => `
           <div class="exp-metrics-row">
             <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:66%;" title="${esc(v.title)}">💾 ${esc(v.title)} (${v.size_mb} MB)</span>
@@ -2698,5 +2701,31 @@ async function archiveVideoToDrive(videoId) {
     showToast('Erro de rede ao arquivar live no Drive.', 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Arquivar no Drive'; }
+  }
+}
+
+async function cleanVideosAndClipsOnly() {
+  if (!confirm('Limpar TODOS os vídeos processados, clipes gerados e arquivos locais (downloads/clips/thumbnails/transcrições)?\n\nSuas chaves de API, contas YouTube, Google Drive, canais monitorados, Brand Kits, BGM e configurações serão 100% PRESERVADOS.')) {
+    return;
+  }
+  const btn = document.getElementById('btnCleanMedia');
+  if (btn) { btn.disabled = true; btn.textContent = 'Limpando...'; }
+  try {
+    const res = await fetch('/api/storage/clean-media', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archive_to_drive_first: false }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao limpar vídeos e clipes.', 'error');
+      return;
+    }
+    showToast(`Limpeza concluída: ${data.deleted_videos} vídeo(s), ${data.deleted_clips} clipe(s) e ${data.files_removed} arquivo(s) (${data.freed_mb} MB). Contas, APIs e Drive intactos!`, 'success');
+    await Promise.all([fetchStatus(), loadAnalyticsAndStorageView()]);
+  } catch (e) {
+    showToast('Erro de rede ao limpar vídeos e clipes.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Limpar vídeos e clipes'; }
   }
 }

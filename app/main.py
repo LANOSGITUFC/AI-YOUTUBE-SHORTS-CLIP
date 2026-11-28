@@ -1663,6 +1663,72 @@ def save_storage_drive_config(payload: Dict[str, Any], db: Session = Depends(get
     return {"status": "saved", "drive_folder_id": folder_id, "rclone_remote": rclone_remote}
 
 
+@app.post("/api/storage/clean-media")
+def clean_videos_and_clips_only(payload: Optional[Dict[str, Any]] = None, db: Session = Depends(get_db)):
+    """
+    Limpa APENAS vídeos processados, clipes gerados, agendamentos locais e arquivos de mídia nas pastas
+    (data/downloads, data/clips, data/thumbnails, data/transcripts, data/heatmaps).
+    PRESERVA 100%: chaves de API, contas YouTube (OAuth), Google Drive (token + pasta),
+    canais monitorados, Brand Kits, layouts salvos, BGM, cookies e todas as configurações!
+    """
+    body = payload or {}
+    archive_first = bool(body.get("archive_to_drive_first", False))
+    archived_before_clean = 0
+
+    if archive_first:
+        from app.services.drive_archiver import DriveArchiver
+        archiver = DriveArchiver(db)
+        for v in db.query(SourceVideo).filter(SourceVideo.status.in_(["processed", "transcribed", "downloaded"])).all():
+            if v.video_path and os.path.isfile(v.video_path):
+                try:
+                    archiver.archive_video(v.id, delete_local_after=True)
+                    archived_before_clean += 1
+                except Exception:
+                    pass
+
+    # 1. Limpa somente tabelas de vídeos, clipes, agendamentos e experimentos
+    deleted_posts = db.query(ScheduledPost).delete(synchronize_session=False)
+    deleted_exps = db.query(ChannelExperiment).delete(synchronize_session=False)
+    deleted_clips = db.query(ClipSegment).delete(synchronize_session=False)
+    deleted_videos = db.query(SourceVideo).delete(synchronize_session=False)
+    db.commit()
+
+    # 2. Limpa somente pastas de mídia temporária/local (NUNCA toca em data/tokens, data/bgm, cookies.txt, client_secret*.json ou .db)
+    media_dirs = [
+        "./data/downloads",
+        "./data/clips",
+        "./data/thumbnails",
+        "./data/transcripts",
+        "./data/heatmaps",
+    ]
+    files_removed = 0
+    freed_bytes = 0
+    for d in media_dirs:
+        if not os.path.isdir(d):
+            continue
+        for fn in os.listdir(d):
+            fp = os.path.join(d, fn)
+            if os.path.isfile(fp):
+                try:
+                    freed_bytes += os.path.getsize(fp)
+                    os.remove(fp)
+                    files_removed += 1
+                except OSError:
+                    pass
+
+    return {
+        "status": "cleaned",
+        "archived_before_clean": archived_before_clean,
+        "deleted_videos": deleted_videos,
+        "deleted_clips": deleted_clips,
+        "deleted_posts": deleted_posts,
+        "deleted_experiments": deleted_exps,
+        "files_removed": files_removed,
+        "freed_mb": round(freed_bytes / (1024 * 1024), 1),
+        "preserved": ["api_keys", "youtube_accounts", "google_drive", "source_channels", "brand_kits", "settings", "bgm", "cookies"],
+    }
+
+
 @app.get("/api/auth/youtube/callback")
 def youtube_oauth_callback(code: str, state: Optional[str] = "Canal Novo", db: Session = Depends(get_db)):
     if state == "gdrive_archiver":
