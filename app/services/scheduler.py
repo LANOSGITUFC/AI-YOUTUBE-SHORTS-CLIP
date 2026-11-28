@@ -176,8 +176,19 @@ class PostScheduler:
                 raise ValueError("Nenhum canal de destino ativo cadastrado.")
             destination_channel_id = dest.id
 
-        empty_slots = self.get_upcoming_empty_slots(destination_channel_id, days_ahead=30)
-        if not empty_slots:
+        # Modo inteligente: usa o próximo melhor horário do canal (mapa de calor) no lugar da cadência fixa
+        from app.services import smart_schedule
+        smart_dt = None
+        if smart_schedule.is_smart_auto_enabled(self.db):
+            dest_ch = self.db.query(DestinationChannel).filter(DestinationChannel.id == destination_channel_id).first()
+            slot = smart_schedule.next_optimal_slot(self.db, dest_ch) if dest_ch else None
+            if slot:
+                smart_dt = datetime.datetime.fromisoformat(slot["datetime"])
+
+        empty_slots = [] if smart_dt else self.get_upcoming_empty_slots(destination_channel_id, days_ahead=30)
+        if smart_dt:
+            target_dt = smart_dt
+        elif not empty_slots:
             _, _, interval_h, _ = self.get_schedule_cadence()
             last_post = (
                 self.db.query(ScheduledPost)

@@ -414,6 +414,7 @@ function renderClipsGrid() {
             <button class="btn btn-sm" onclick="openLayoutEditor(${c.id})" title="Posicionar câmera, gameplay e legenda">Layout</button>
           </div>
           <div class="clip-actions-group">
+            ${c.is_ready && (c.status === 'rendered' || c.status === 'scheduled') ? `<button class="btn btn-sm" id="btnBest-${c.id}" onclick="scheduleClipBest(${c.id})" title="${c.status === 'scheduled' ? 'Mover para o próximo horário ótimo livre' : 'Agendar no próximo horário ótimo livre (canal escolhido pelo peso)'}">⚡ Melhor horário</button>` : ''}
             ${c.is_ready ? `<button class="btn btn-sm" onclick="openExportPack(${c.id})">Exportar</button>` : ''}
             <button class="btn btn-danger btn-sm" onclick="deleteClip(${c.id})" title="Excluir clipe">Excluir</button>
           </div>
@@ -854,6 +855,7 @@ async function loadCalendar() {
     `).join('');
     calendarDestChannels = destChannels;
     wireCalendarDragDrop();
+    loadSmartPanel(sel && sel.value ? Number(sel.value) : (destChannels[0] && destChannels[0].id));
   } catch (e) {
     console.error(e);
   }
@@ -1958,8 +1960,11 @@ async function openEditPostModal(postId) {
     [when, chSel].forEach((el) => { el.disabled = !p.editable; });
     document.getElementById('editPostSaveBtn').style.display = p.editable ? '' : 'none';
     document.getElementById('editPostRemoveBtn').style.display = p.editable ? '' : 'none';
+    document.getElementById('editPostBestBtn').style.display = p.editable ? '' : 'none';
     setPostModalError('');
     openModal('editPostModal');
+    if (p.editable) loadPostSuggestions(); else document.getElementById('editPostSuggestions').innerHTML = '';
+    chSel.onchange = () => { if (p.editable) loadPostSuggestions(); };
   } catch (e) {
     showToast('Erro ao abrir agendamento.', 'error');
   }
@@ -1984,6 +1989,149 @@ async function saveScheduledPost() {
   if (!res.ok) { setPostModalError(data.detail || 'Erro ao salvar.'); return; }
   closeModal('editPostModal');
   showToast('Agendamento atualizado!', 'success');
+  loadCalendar();
+  fetchStatus();
+}
+
+/* ---- Agendamento inteligente: mapa de calor + melhor horário ---- */
+let smartNiches = [];
+let smartChannelId = null;
+
+function heatColor(score) {
+  // 0 → fundo neutro, 100 → verde forte (mesma família do --ok)
+  const t = Math.max(0, Math.min(100, Number(score) || 0)) / 100;
+  const alpha = 0.06 + 0.84 * t * t;
+  return `rgba(48, 164, 108, ${alpha.toFixed(3)})`;
+}
+
+function smartSourceLabel(d) {
+  if (d.source === 'historico') return `Baseado em ${d.posts_used} publicações deste canal (confiança ${Math.round(d.confidence * 100)}%).`;
+  if (d.source === 'misto') return `Padrão do nicho ${d.niche_label} ajustado por ${d.posts_used} publicação(ões) do canal. Fica mais preciso conforme as views sincronizam.`;
+  return `Ainda sem histórico com views: usando o padrão do nicho ${d.niche_label}. O mapa aprende sozinho a cada Short publicado (sincronize em Analytics).`;
+}
+
+function renderSmartChips(container, items, onPick) {
+  if (!container) return;
+  if (!items || !items.length) {
+    container.innerHTML = '<span class="section-desc">Nenhum horário livre nos próximos 14 dias.</span>';
+    return;
+  }
+  container.innerHTML = items.map((it, i) => `
+    <button type="button" class="smart-chip ${it.is_optimal ? 'optimal' : ''}" data-i="${i}" title="Nota ${esc(it.score)}/100${it.is_optimal ? ' · horário ótimo' : ''}">
+      <span>${esc(it.label)}</span><b>${esc(it.score)}</b>
+    </button>`).join('');
+  container.querySelectorAll('.smart-chip').forEach((btn) => {
+    btn.addEventListener('click', () => onPick(items[Number(btn.dataset.i)]));
+  });
+}
+
+async function loadSmartPanel(channelId) {
+  const panel = document.getElementById('smartPanel');
+  if (!panel) return;
+  if (!channelId) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  smartChannelId = channelId;
+  try {
+    if (!smartNiches.length) smartNiches = await (await fetch('/api/smart-schedule/niches')).json();
+    const res = await fetch(`/api/smart-schedule/heatmap?channel_id=${encodeURIComponent(channelId)}`);
+    const d = await res.json();
+    if (!res.ok) { setText('smartSourceText', d.detail || 'Erro ao carregar o mapa.'); return; }
+    if (smartChannelId !== channelId) return; // trocou de canal no meio do carregamento
+
+    const nicheSel = document.getElementById('smartNicheSelect');
+    nicheSel.innerHTML = smartNiches.map((n) => `<option value="${esc(n.id)}">${esc(n.label)}</option>`).join('');
+    nicheSel.value = d.niche;
+    document.getElementById('smartAutoToggle').checked = Boolean(d.smart_auto);
+    setText('smartSourceText', smartSourceLabel(d));
+
+    renderSmartChips(document.getElementById('smartSuggestions'), d.suggestions, (it) => {
+      showToast(`${it.label} (nota ${it.score}). Use "⚡ Melhor horário" num clipe ou edite um agendamento para usar esse horário.`, 'info');
+    });
+
+    const hm = document.getElementById('smartHeatmap');
+    const hours = Array.from({ length: 24 }, (_, h) => h);
+    let html = '<div class="hm-corner"></div>' + hours.map((h) => `<div class="hm-hour">${h % 3 === 0 ? String(h).padStart(2, '0') : ''}</div>`).join('');
+    d.scores.forEach((row, wd) => {
+      html += `<div class="hm-day">${esc(d.weekdays[wd])}</div>`;
+      row.forEach((sc, h) => {
+        const n = d.samples[wd][h];
+        const opt = sc >= d.optimal_threshold;
+        html += `<div class="hm-cell ${opt ? 'opt' : ''} ${n ? 'has-data' : ''}" style="background:${heatColor(sc)}" title="${esc(d.weekdays[wd])} ${String(h).padStart(2, '0')}h · nota ${sc}/100${n ? ` · ${n} post(s) nesse horário` : ''}"></div>`;
+      });
+    });
+    hm.innerHTML = html;
+  } catch (e) {
+    setText('smartSourceText', 'Erro ao carregar o mapa de calor.');
+  }
+}
+
+async function saveChannelNiche(niche) {
+  if (!smartChannelId) return;
+  const res = await fetch(`/api/destination-channels/${smartChannelId}/niche`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ niche }),
+  });
+  if (!res.ok) { showToast('Não foi possível salvar o nicho.', 'error'); return; }
+  showToast('Nicho salvo. Mapa recalculado.', 'success');
+  loadSmartPanel(smartChannelId);
+}
+
+async function toggleSmartAuto(on) {
+  const res = await fetch('/api/smart-schedule/settings', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ smart_auto: Boolean(on) }),
+  });
+  if (!res.ok) { showToast('Não foi possível salvar.', 'error'); return; }
+  showToast(on ? 'Auto-preencher agora usa o melhor horário de cada canal.' : 'Auto-preencher voltou para a cadência de 18h.', 'success');
+}
+
+async function scheduleClipBest(clipId) {
+  const btn = document.getElementById(`btnBest-${clipId}`);
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/smart-schedule/schedule', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clip_id: clipId }),
+    });
+    const data = await res.json();
+    if (!res.ok) { showToast(data.detail || 'Não foi possível agendar.', 'error'); return; }
+    showToast(`Agendado: ${data.slot.label} em ${data.destination_channel_name} (nota ${data.slot.score}).`, 'success');
+    loadClips();
+    fetchStatus();
+    if (currentView === 'calendar') loadCalendar();
+  } catch (e) {
+    showToast('Erro de rede ao agendar.', 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function loadPostSuggestions() {
+  const box = document.getElementById('editPostSuggestions');
+  const postId = Number(document.getElementById('editPostId').value);
+  const chId = Number(document.getElementById('editPostChannel').value);
+  if (!box || !chId) return;
+  box.innerHTML = '<span class="section-desc">Carregando…</span>';
+  try {
+    const res = await fetch(`/api/smart-schedule/suggest?channel_id=${chId}&count=5&post_id=${postId}`);
+    const d = await res.json();
+    if (!res.ok) { box.innerHTML = `<span class="section-desc">${esc(d.detail || 'Erro')}</span>`; return; }
+    renderSmartChips(box, d.suggestions, (it) => {
+      document.getElementById('editPostWhen').value = it.datetime.slice(0, 16);
+      box.querySelectorAll('.smart-chip').forEach((b) => b.classList.toggle('picked', b.textContent.includes(it.label)));
+    });
+  } catch (e) {
+    box.innerHTML = '<span class="section-desc">Erro ao carregar sugestões.</span>';
+  }
+}
+
+async function scheduleBestFromModal() {
+  const postId = Number(document.getElementById('editPostId').value);
+  const chId = Number(document.getElementById('editPostChannel').value);
+  const res = await fetch('/api/smart-schedule/schedule', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ post_id: postId, channel_id: chId }),
+  });
+  const data = await res.json();
+  if (!res.ok) { setPostModalError(data.detail || 'Não foi possível reagendar.'); return; }
+  closeModal('editPostModal');
+  showToast(`Movido para ${data.slot.label} (nota ${data.slot.score}).`, 'success');
   loadCalendar();
   fetchStatus();
 }

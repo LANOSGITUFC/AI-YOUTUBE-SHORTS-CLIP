@@ -388,6 +388,35 @@
               <button class="btn btn-primary btn-sm" onclick="autoFillSchedule()">Auto-preencher grade</button>
             </div>
           </div>
+          <div class="panel smart-panel" id="smartPanel">
+            <div class="smart-head">
+              <div class="smart-head-text">
+                <h3 class="rank-title">Melhores horários deste canal</h3>
+                <p class="section-desc" id="smartSourceText">Carregando…</p>
+              </div>
+              <div class="smart-controls">
+                <label class="smart-field">
+                  <span>Nicho</span>
+                  <select id="smartNicheSelect" class="select" onchange="saveChannelNiche(this.value)"></select>
+                </label>
+                <label class="smart-toggle" title="Quando ligado, o auto-preencher e o agendamento automático usam o melhor horário de cada canal em vez da cadência de 18h">
+                  <input type="checkbox" id="smartAutoToggle" onchange="toggleSmartAuto(this.checked)">
+                  <span>Auto-preencher no melhor horário</span>
+                </label>
+              </div>
+            </div>
+            <div class="smart-suggest-row">
+              <span class="smart-suggest-label">Próximos horários livres:</span>
+              <div id="smartSuggestions" class="smart-chips"></div>
+            </div>
+            <div class="heatmap-scroll" role="region" aria-label="Mapa de calor semanal de desempenho por horário" tabindex="0">
+              <div id="smartHeatmap" class="heatmap"></div>
+            </div>
+            <div class="heatmap-legend">
+              <span>Pior</span><span class="heatmap-legend-bar"></span><span>Melhor</span>
+              <span class="heatmap-legend-note">Borda = horário ótimo · ponto = já teve post nesse horário</span>
+            </div>
+          </div>
           <p class="section-desc cal-dnd-hint">Arraste um vídeo para outro horário ou dia (se estiver ocupado, os dois trocam de lugar), ou solte sobre outro canal. Clique para editar.</p>
           <div id="calendarGrid" class="calendar-grid"></div>
           <div id="channelDropZone" class="channel-drop-zone">
@@ -1096,10 +1125,15 @@
           <label for="editPostChannel">Canal de destino</label>
           <select id="editPostChannel" class="select"></select>
         </div>
+        <div class="field">
+          <label>Melhores horários livres deste canal</label>
+          <div id="editPostSuggestions" class="smart-chips"><span class="section-desc">Carregando…</span></div>
+        </div>
         <p id="editPostError" class="form-error" style="display:none;"></p>
       </div>
       <div class="modal-foot">
         <button class="btn btn-danger btn-sm" id="editPostRemoveBtn" onclick="removeScheduledPostFromModal()" style="margin-right:auto;">Remover da agenda</button>
+        <button class="btn btn-sm" id="editPostBestBtn" onclick="scheduleBestFromModal()" title="Move para o próximo horário ótimo livre do canal escolhido">⚡ Melhor horário</button>
         <button class="btn btn-sm" onclick="closeModal('editPostModal'); openEditClipModal(Number(document.getElementById('editPostClipId').value))">Editar clipe</button>
         <button class="btn btn-primary btn-sm" id="editPostSaveBtn" onclick="saveScheduledPost()">Salvar</button>
       </div>
