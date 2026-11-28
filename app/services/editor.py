@@ -742,15 +742,33 @@ class VideoEditor:
             if auto_color.get("glow"):
                 glow_enabled = True
         else:
-            # Micro-variação sutil de saturação/contraste por clipe (natural aos olhos, evita duplicidade de assinatura visual)
-            cid_seed = int(getattr(clip, "id", 1) or 1)
-            sat_offsets = [1.02, 1.04, 0.98, 1.05, 1.01, 0.99, 1.06, 1.03]
-            con_offsets = [1.01, 1.02, 1.00, 1.03, 0.99, 1.02, 1.01, 1.00]
-            bri_offsets = [0.005, -0.005, 0.008, 0.0, -0.008, 0.004, -0.004, 0.006]
-            sat_v = sat_offsets[cid_seed % len(sat_offsets)]
-            con_v = con_offsets[(cid_seed * 3) % len(con_offsets)]
-            bri_v = bri_offsets[(cid_seed * 5) % len(bri_offsets)]
-            post.append(f"eq=saturation={sat_v:.2f}:contrast={con_v:.2f}:brightness={bri_v:.3f}")
+            # Micro-variação sutil (estritamente <= ±5%) de saturação/contraste/brilho/gama/matiz para evitar duplicidade visual
+            remix_color = None
+            try:
+                raw_ec = json.loads(getattr(clip, "editor_config_json", None) or "{}")
+                if isinstance(raw_ec.get("remix_color"), dict):
+                    remix_color = raw_ec["remix_color"]
+            except Exception:
+                remix_color = None
+
+            if remix_color:
+                sat_v = max(0.95, min(1.05, float(remix_color.get("saturation", 1.03))))
+                con_v = max(0.95, min(1.05, float(remix_color.get("contrast", 1.02))))
+                bri_v = max(-0.03, min(0.03, float(remix_color.get("brightness", 0.01))))
+                gam_v = max(0.95, min(1.05, float(remix_color.get("gamma", 1.01))))
+                hue_v = max(-5.0, min(5.0, float(remix_color.get("hue", 0.0))))
+                post.append(f"eq=saturation={sat_v:.3f}:contrast={con_v:.3f}:brightness={bri_v:.3f}:gamma={gam_v:.3f}")
+                if abs(hue_v) >= 0.5:
+                    post.append(f"hue=h={hue_v:.1f}")
+            else:
+                cid_seed = int(getattr(clip, "id", 1) or 1)
+                sat_offsets = [1.02, 1.04, 0.98, 1.05, 1.01, 0.97, 1.03, 0.99]
+                con_offsets = [1.01, 1.02, 1.00, 1.03, 0.99, 1.02, 1.01, 0.98]
+                bri_offsets = [0.005, -0.005, 0.008, 0.0, -0.008, 0.004, -0.004, 0.006]
+                sat_v = sat_offsets[cid_seed % len(sat_offsets)]
+                con_v = con_offsets[(cid_seed * 3) % len(con_offsets)]
+                bri_v = bri_offsets[(cid_seed * 5) % len(bri_offsets)]
+                post.append(f"eq=saturation={sat_v:.2f}:contrast={con_v:.2f}:brightness={bri_v:.3f}")
 
         if post:
             parts.append(f"{cur_v}{','.join(post)}[vpost]")

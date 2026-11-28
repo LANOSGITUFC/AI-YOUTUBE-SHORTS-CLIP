@@ -957,8 +957,32 @@ class MomentDetector:
         title = str(overrides.get("title") or m.label or "Melhor momento").strip()[:240]
         dedup = DeduplicationEngine(self.db)
         is_over, reason = dedup.is_overlapping(m.video_id, start, end)
+
+        remix_style: Optional[Dict[str, Any]] = None
         if is_over:
-            raise ValueError(f"Conflito de duplicidade: {reason}")
+            # Em vez de travar por duplicidade, gera uma variante Remix com ajuste sutil (<=5%) de cor/saturação + novo estilo de legenda/cena
+            existing_same_video = (
+                self.db.query(ClipSegment)
+                .filter(ClipSegment.video_id == m.video_id)
+                .filter(ClipSegment.status != "discarded")
+                .all()
+            )
+            overlap_count = sum(
+                1 for c in existing_same_video
+                if not (end <= float(c.start_time or 0) or start >= float(c.end_time or 0))
+            )
+            ref_clip = existing_same_video[-1] if existing_same_video else None
+            ref_preset = None
+            if ref_clip and ref_clip.editor_config_json:
+                try:
+                    ref_preset = json.loads(ref_clip.editor_config_json).get("caption_preset")
+                except Exception:
+                    pass
+            remix_style = DeduplicationEngine.build_remix_style(
+                remix_index=max(1, overlap_count),
+                existing_crop=ref_clip.crop_mode if ref_clip else None,
+                existing_preset=ref_preset,
+            )
 
         try:
             reasons = json.loads(m.reasons_json or "[]")
@@ -975,6 +999,7 @@ class MomentDetector:
             virality_score=max(1, min(100, score)),
             category=(m.category or "highlight")[:45],
             suggested_by=f"{agent}:{m.kind}"[:45],
+            allow_remix=bool(is_over),
         )
         seg.hook_score = max(1, min(100, int(max(m.audio_score or 0, m.speech_score or 0, score))))
         seg.pacing_score = max(1, min(100, int(max(m.visual_score or 0, score - 4))))
@@ -982,16 +1007,35 @@ class MomentDetector:
         crop = self._get_setting("CROP_MODE", "split_screen")
         if overrides.get("crop_mode"):
             crop = str(overrides["crop_mode"])
+        elif remix_style:
+            crop = remix_style["crop_mode"]
         seg.crop_mode = crop
+
+        ed_cfg: Dict[str, Any] = {}
+        if remix_style:
+            ed_cfg.update({
+                "is_remix": True,
+                "remix_reason": reason,
+                "caption_preset": remix_style["caption_preset"],
+                "remix_color": remix_style["remix_color"],
+                "motion_type": remix_style["motion_type"],
+                "transition_type": remix_style["transition_type"],
+            })
         try:
             from app.services.seo_engine import ViralSEOEngine
-            seo = ViralSEOEngine(self.db).generate_for_clip(seg, prefer_llm=False)
-            seg.editor_config_json = json.dumps(
-                {"seo_description": seo["description"], "seo_tags": seo["tags_csv"], "seo_hashtags": seo["hashtags_str"]},
-                ensure_ascii=False,
-            )
+            seo_angle = remix_style["seo_angle"] if remix_style else None
+            seo = ViralSEOEngine(self.db).generate_for_clip(seg, prefer_llm=False, style_angle=seo_angle)
+            if remix_style and seo.get("title"):
+                seg.title = seo["title"]
+            ed_cfg.update({
+                "seo_description": seo["description"],
+                "seo_tags": seo["tags_csv"],
+                "seo_hashtags": seo["hashtags_str"],
+            })
         except Exception:
             pass
+        if ed_cfg:
+            seg.editor_config_json = json.dumps(ed_cfg, ensure_ascii=False)
         m.status = "accepted"
         m.clip_id = seg.id
         if "start_time" in overrides or "end_time" in overrides:

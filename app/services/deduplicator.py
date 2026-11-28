@@ -142,6 +142,46 @@ class DeduplicationEngine:
 
         return available
 
+    @staticmethod
+    def build_remix_style(
+        remix_index: int = 1,
+        existing_crop: Optional[str] = None,
+        existing_preset: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Gera uma variação sutil de estilo para reaproveitar um trecho sem duplicidade:
+        - Saturação, contraste, brilho, gama e matiz alterados em no máximo ±5%
+        - Preset de legenda e enquadramento rotacionados em relação ao clipe original
+        """
+        presets = ["hormozi", "beast", "karaoke", "minimal", "think_media", "neon_pulse", "gold_pop"]
+        avail_presets = [p for p in presets if p != existing_preset] or presets
+        chosen_preset = avail_presets[(remix_index - 1) % len(avail_presets)]
+
+        crops = ["split_screen", "blur_bg", "face_tracking"]
+        avail_crops = [c for c in crops if c != existing_crop] or crops
+        chosen_crop = avail_crops[(remix_index - 1) % len(avail_crops)]
+
+        seo_angles = ["curiosity", "question", "short_punch", "story", "shock"]
+        chosen_seo = seo_angles[(remix_index - 1) % len(seo_angles)]
+
+        # Paletas determinísticas estritamente dentro de ±5% (0.95..1.05)
+        color_variants = [
+            {"saturation": 1.04, "contrast": 1.03, "brightness": 0.015, "gamma": 1.02, "hue": 3.0},
+            {"saturation": 0.96, "contrast": 1.04, "brightness": -0.015, "gamma": 0.98, "hue": -3.0},
+            {"saturation": 1.05, "contrast": 0.97, "brightness": 0.020, "gamma": 1.03, "hue": 4.0},
+            {"saturation": 0.97, "contrast": 1.02, "brightness": -0.010, "gamma": 0.97, "hue": -4.0},
+            {"saturation": 1.03, "contrast": 1.05, "brightness": 0.010, "gamma": 1.01, "hue": 2.0},
+        ]
+        color_cfg = color_variants[(remix_index - 1) % len(color_variants)]
+        return {
+            "caption_preset": chosen_preset,
+            "crop_mode": chosen_crop,
+            "seo_angle": chosen_seo,
+            "remix_color": color_cfg,
+            "motion_type": "punch-in" if remix_index % 2 == 1 else "slow-push",
+            "transition_type": "white-flash" if remix_index % 2 == 1 else "dip-to-black",
+        }
+
     def register_segment(
         self,
         video_id: str,
@@ -152,14 +192,16 @@ class DeduplicationEngine:
         summary: str = "",
         virality_score: int = 85,
         category: str = "highlight",
-        suggested_by: str = "claude_code"
+        suggested_by: str = "claude_code",
+        allow_remix: bool = False,
     ) -> ClipSegment:
         """
         Valida contra sobreposição e grava o segmento no banco.
-        Lança ValueError se houver sobreposição.
+        Se allow_remix=False (padrão), lança ValueError em caso de sobreposição.
+        Se allow_remix=True, permite criar uma nova variante com estilo/cores/legendas distintos.
         """
         has_overlap, reason = self.is_overlapping(video_id, start_time, end_time)
-        if has_overlap:
+        if has_overlap and not allow_remix:
             raise ValueError(f"Deduplication Error: {reason}")
 
         segment = ClipSegment(
