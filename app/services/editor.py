@@ -234,7 +234,7 @@ class VideoEditor:
         progress_bar = bool(ed_cfg.get("progress_bar", ed_cfg.get("progressBar", False)))
         headline_text = str(ed_cfg.get("headline_text") or "").strip()
         hook_enabled = bool(ed_cfg.get("hook_enabled", False))
-        hook_banner_text = str(ed_cfg.get("hook_banner_text") or (clip.hook_text if hook_enabled else "") or "ESPERA ATÉ O FINAL").strip()
+        hook_banner_text = str(ed_cfg.get("hook_banner_text") or "").strip()
         hook_duration = max(2.0, min(6.0, float(ed_cfg.get("hook_duration", 4.0) or 4.0)))
         remove_silences = bool(ed_cfg.get("remove_silences", ed_cfg.get("removeSilence", False)))
         watermark_text = str(ed_cfg.get("watermark_text") if ed_cfg.get("watermark_text") is not None else preset.get("watermark_text", "")).strip()
@@ -343,7 +343,7 @@ class VideoEditor:
                 clip_end=eff_duration,
                 output_path=ass_subtitles_path,
                 style_config=preset,
-                fallback_text=clip.hook_text or "",
+                fallback_text="",
             )
         else:
             self.subtitle_engine.generate_ass_file(
@@ -353,7 +353,7 @@ class VideoEditor:
                 clip_end=eff_duration,
                 output_path=ass_subtitles_path,
                 style_config=preset,
-                fallback_text=clip.hook_text or "",
+                fallback_text="",
             )
         clip.subtitles_path = ass_subtitles_path
 

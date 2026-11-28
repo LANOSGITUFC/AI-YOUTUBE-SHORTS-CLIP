@@ -495,16 +495,21 @@ class HighlightAnalyzer:
                     s_t = max(w["start"], p_t - 6.0)
                     e_t = min(w["end"], s_t + clip_len)
                     if e_t - s_t >= min_dur and not _collides(s_t, e_t):
-                        hook = _text_around(p_t) or f"Reação intensa em {video.title[:40]}"
+                        spoken = _text_around(p_t).strip()
+                        clean_vt = " ".join((video.title or "").split())
+                        if len(clean_vt) > 52:
+                            clean_vt = clean_vt[:52].rsplit(" ", 1)[0].strip(" -|:,.")
+                        hook = spoken or clean_vt
+                        raw_title = (spoken[:56].rsplit(" ", 1)[0] if len(spoken) > 56 else spoken) if spoken else clean_vt
                         score = min(98, int(82 + min(16, (peak["ratio"] - 1.2) * 10)))
                         candidates.append({
                             "start_time": round(s_t, 1),
                             "end_time": round(e_t, 1),
-                            "title": f"{hook[:52].strip().rstrip('.,') or video.title[:48]}",
+                            "title": raw_title.strip().rstrip(".,-:") or clean_vt or "Corte da live",
                             "hook_text": hook,
-                            "summary": f"Pico acústico real ({peak['ratio']}x acima da média) detectado no áudio",
+                            "summary": f"Trecho com pico de áudio real ({peak['ratio']}x acima da média)",
                             "virality_score": score,
-                            "category": "rage" if peak["ratio"] >= 2.0 else "funny",
+                            "category": "highlight",
                         })
                     break
 

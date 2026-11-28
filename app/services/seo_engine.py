@@ -45,14 +45,19 @@ KNOWN_GAMES = [
     ("React", ["reage", "react", "reagindo"]),
 ]
 
-SEO_SYSTEM_PROMPT = """Você é um estrategista de retenção e SEO especializado em YouTube Shorts de streamers e gamers brasileiros.
-Dado o nome do streamer, título do vídeo original, categoria do momento e a fala transcrita do corte, gere metadados de ALTO CTR que pareçam escritos por um editor humano brasileiro (nada robótico, sem clickbait genérico tipo "MOMENTO INSANO" ou "DESTAQUE #1", sem TUDO EM MAIÚSCULO).
+SEO_SYSTEM_PROMPT = """Você é um editor humano brasileiro criando títulos e descrições REALISTAS e HONESTOS para YouTube Shorts de streamers e gamers.
 
-Regras:
-1. "title": 38 a 72 caracteres, natural em PT-BR, gera curiosidade sem entregar o final, máximo 1 emoji. Inclua o nome do streamer ou o jogo quando fizer sentido.
-2. "description": 2 frases curtas em PT-BR dando contexto + uma pergunta curta no final para gerar comentários.
-3. "tags": lista de 12 a 15 tags de busca curtas em minúsculas (sem #), misturando streamer, jogo, formato e termos pesquisados no Brasil.
-4. "hashtags": lista de 5 hashtags (com #), sempre começando com #shorts + streamer + jogo + nicho.
+REGRAS CRÍTICAS DE REALISMO (OBRIGATÓRIAS):
+- NUNCA invente fatos, sustos, brigas, recordes ou eventos que NÃO estejam explicitamente na fala transcrita ou no título original.
+- NUNCA use clickbait exagerado ou falso como "Reação intensa", "Quase caiu da cadeira", "Você não vai acreditar", "Espera até o final", "Ninguém esperava", "Momento insano", "Quebrou tudo".
+- Se o trecho for uma conversa simples ou gameplay tranquila, descreva exatamente isso de forma natural e direta — prometa apenas o que realmente acontece no corte.
+- NUNCA corte palavras no meio e NÃO use TUDO EM MAIÚSCULO.
+
+Formato:
+1. "title": 28 a 68 caracteres, natural em PT-BR, fiel ao conteúdo real do corte, máximo 1 emoji (ou nenhum). Inclua o nome do streamer e/ou o jogo quando fizer sentido.
+2. "description": 1 a 2 frases curtas e realistas dando contexto verdadeiro do trecho + uma pergunta simples e natural relacionada ao assunto.
+3. "tags": lista de 12 a 15 tags de busca curtas em minúsculas (sem #), fiéis ao streamer e ao jogo.
+4. "hashtags": lista de 4 a 5 hashtags (com #), começando com #shorts + streamer + jogo + nicho.
 
 Retorne APENAS JSON válido:
 {
@@ -320,6 +325,13 @@ class ViralSEOEngine:
 
         return None
 
+    @staticmethod
+    def _clean_word_truncate(text: str, max_len: int) -> str:
+        s = re.sub(r"\s+", " ", (text or "")).strip(" -|:;,.")
+        if len(s) <= max_len:
+            return s
+        return s[:max_len].rsplit(" ", 1)[0].strip(" -|:;,.")
+
     def _build_smart_ptbr_seo(
         self,
         streamer: str,
@@ -333,117 +345,89 @@ class ViralSEOEngine:
         rng = random.Random(seed)
         in_game = f" no {game}" if (game and game != "React") else (" reagindo" if game == "React" else " na live")
 
+        # Extrai um resumo limpo do título original (sem emojis exagerados / sem gritaria)
+        clean_vt = re.sub(r"#[A-Za-zÀ-ÿ0-9_]+", "", video_title or "")
+        clean_vt = re.sub(r"\s+", " ", clean_vt).strip(" -|!?:")
+        # Converte frases inteiras em CAPS para formato normal legível
+        if clean_vt and sum(1 for c in clean_vt if c.isupper()) > len(clean_vt) * 0.55:
+            clean_vt = clean_vt.capitalize()
+        topic = self._clean_word_truncate(clean_vt, 44)
+
+        # Extrai trecho curto real falado na transcrição se disponível e legível
+        spoken_snippet = ""
+        if transcript_excerpt and len(transcript_excerpt.strip()) >= 14:
+            first_sent = re.split(r"[.!?\n]", transcript_excerpt.strip())[0].strip()
+            if 12 <= len(first_sent) <= 58:
+                spoken_snippet = self._clean_word_truncate(first_sent, 46)
+
+        if spoken_snippet:
+            base_candidates = [
+                f'{streamer}{in_game}: "{spoken_snippet}"',
+                f"{streamer} — {spoken_snippet}",
+                f"{spoken_snippet} ({streamer}{in_game})",
+            ]
+        elif topic:
+            base_candidates = [
+                f"{streamer}: {topic}",
+                f"Trecho da live do {streamer} — {topic}",
+                f"{topic} | {streamer}",
+            ]
+        else:
+            base_candidates = [
+                f"Trecho da gameplay do {streamer}{in_game}",
+                f"Corte da live do {streamer}{in_game}",
+                f"{streamer} jogando{in_game}",
+            ]
+
         angle_templates = {
             "curiosidade": [
-                f"Espera até o final pra ver o que aconteceu com o {streamer}{in_game}",
-                f"Ninguém acreditou no que o {streamer} fez nesse segundo{in_game}",
-                f"Olha o detalhe que quase passou batido na live do {streamer}{in_game}",
+                f"{streamer}: {topic}" if topic else f"Trecho da live do {streamer}{in_game}",
+                f"Como o {streamer} resolveu isso{in_game}",
             ],
             "choque_reacao": [
-                f"A reação do {streamer} ao vivo foi impagável{in_game} 😱",
-                f"{streamer} travou completamente com o que viu{in_game}",
-                f"O susto e a cara do {streamer} nesse momento{in_game} 😂",
+                f"A reação do {streamer}{in_game}",
+                f"{streamer} reagindo{in_game}: {topic}" if topic else f"{streamer} ao vivo{in_game}",
             ],
             "pergunta_debate": [
-                f"Isso foi sorte ou pura habilidade do {streamer}{in_game}?",
-                f"Você teria reagido igual ao {streamer} nessa hora{in_game}?",
-                f"Quem errou nessa jogada do {streamer}{in_game}? Comenta!",
+                f"O que você faria no lugar do {streamer}{in_game}?",
+                f"Você concordou com o {streamer} nessa?{in_game}",
             ],
             "direto_curto": [
-                f"{streamer} quebrou tudo{in_game}",
-                f"Timing absurdo do {streamer}",
-                f"{streamer} não tankou isso 😂",
+                f"{streamer}{in_game}",
+                f"{streamer}: {self._clean_word_truncate(topic, 26)}" if topic else f"Corte do {streamer}",
             ],
             "storytelling": [
-                f"Tudo ia bem até o {streamer} fazer isso{in_game} 💀",
-                f"O plano do {streamer} durou exatos 3 segundos{in_game}",
-                f"Em 10 segundos a live do {streamer} virou caos{in_game}",
+                f"Momento da live do {streamer}{in_game}",
+                f"Trecho da gameplay do {streamer}: {self._clean_word_truncate(topic, 32)}" if topic else f"Gameplay do {streamer}{in_game}",
             ],
         }
 
-        templates = {
-            "scare": [
-                f"{streamer} quase caiu da cadeira com esse susto{in_game} 😱",
-                f"O susto que fez o {streamer} travar ao vivo{in_game}",
-                f"Ninguém esperava o que apareceu pro {streamer}{in_game} 😱",
-            ],
-            "rage": [
-                f"{streamer} perdeu a paciência ao vivo{in_game} 😂",
-                f"O momento exato em que o {streamer} tiltou{in_game}",
-                f"Não tinha como o {streamer} ficar calmo depois disso{in_game}",
-            ],
-            "clutch": [
-                f"A jogada absurda do {streamer}{in_game} 🎯",
-                f"Como o {streamer} saiu vivo disso{in_game}?!",
-                f"{streamer} ativou o modo lenda{in_game} 🔥",
-            ],
-            "funny": [
-                f"{streamer} não tankou o que aconteceu{in_game} 😂",
-                f"O timing perfeito que quebrou o {streamer}{in_game}",
-                f"A reação do {streamer} nesse momento é impagável{in_game} 😂",
-            ],
-            "fail": [
-                f"Tudo parecia sob controle até o {streamer} vacilar{in_game} 💀",
-                f"O plano do {streamer} durou 3 segundos{in_game} 😂",
-            ],
-            "highlight": [
-                f"Olha o que aconteceu com o {streamer}{in_game}",
-                f"O momento que roubou a cena na live do {streamer}{in_game}",
-                f"Você precisa ver a reação do {streamer}{in_game}",
-            ],
-        }
-        pool = angle_templates.get(style_angle or "") or templates.get(category, templates["highlight"])
-        title = rng.choice(pool)
-        if style_angle == "direto_curto":
-            title = title[:42].strip()
-
-        ctas = {
-            "scare": "Você teria levado esse susto também? Comenta aí!",
-            "rage": "Você também teria quitado nessa hora? Conta nos comentários!",
-            "clutch": "De 0 a 10, que nota você dá pra essa jogada?",
-            "funny": "Qual foi a parte mais engraçada pra você? Comenta!",
-            "fail": "Já aconteceu algo parecido na sua gameplay? Comenta aí!",
-            "highlight": "O que você achou dessa reação? Deixa nos comentários!",
-        }
-        angle_ctas = {
-            "curiosidade": "Você esperava esse final? Comenta o segundo que te pegou!",
-            "choque_reacao": "Qual nota você dá pra essa reação ao vivo?",
-            "pergunta_debate": "Responde sincero nos comentários — quero ver quem concorda!",
-            "direto_curto": "Curtiu o corte? Deixa o like e se inscreve!",
-            "storytelling": "Já aconteceu uma virada dessas na sua gameplay? Conta aí!",
-        }
+        pool = angle_templates.get(style_angle or "") or base_candidates
+        title = self._clean_word_truncate(rng.choice(pool), 42 if style_angle == "direto_curto" else 70)
 
         context_line = (
-            f"Corte dos melhores momentos de {streamer}{in_game}."
+            f"Trecho da live de {streamer}{in_game}."
             if game
-            else f"Um dos melhores momentos recentes de {streamer}."
+            else f"Trecho recente da live de {streamer}."
         )
-        chosen_cta = angle_ctas.get(style_angle or "") or ctas.get(category, ctas["highlight"])
-        description = f"{context_line} {chosen_cta}\n\nCréditos: {streamer}"
+        cta_line = "O que você achou desse momento? Comenta aí."
+        description = f"{context_line} {cta_line}\n\nCréditos: {streamer}"
 
         streamer_low = streamer.lower()
         tags = [
             streamer_low,
             f"cortes {streamer_low}",
             f"{streamer_low} live",
-            f"melhores momentos {streamer_low}",
+            f"gameplay {streamer_low}",
             "cortes de lives",
             "clips gamers",
             "youtube shorts",
             "shorts brasil",
-            "humor gamer",
+            "gameplay",
         ]
         if game:
             g_low = game.lower()
             tags.extend([g_low, f"{g_low} brasil", f"{streamer_low} {g_low}", f"cortes {g_low}"])
-        if category in ("scare", "rage", "funny", "clutch"):
-            cat_tags = {
-                "scare": ["susto em live", "jogos de terror"],
-                "rage": ["rage gamer", "tiltou ao vivo"],
-                "funny": ["momentos engraçados", "risada em live"],
-                "clutch": ["jogada epica", "mitada"],
-            }
-            tags.extend(cat_tags[category])
 
         hashtags = ["#shorts", f"#{_slug_tag(streamer)}"]
         if game:
@@ -458,8 +442,7 @@ class ViralSEOEngine:
         }
 
     def _normalize_seo(self, raw: Dict[str, Any], streamer: str, game: str) -> Dict[str, Any]:
-        title = str(raw.get("title") or f"Melhor momento de {streamer}").strip()
-        title = re.sub(r"\s+", " ", title)[:82]
+        title = self._clean_word_truncate(str(raw.get("title") or f"Trecho da live de {streamer}"), 76)
 
         description = str(raw.get("description") or f"Corte de {streamer}.").strip()[:1200]
 
