@@ -160,9 +160,18 @@ class PostScheduler:
                 raise ValueError("Nenhum canal de destino ativo cadastrado.")
             destination_channel_id = dest.id
 
-        empty_slots = self.get_upcoming_empty_slots(destination_channel_id, days_ahead=14)
+        empty_slots = self.get_upcoming_empty_slots(destination_channel_id, days_ahead=30)
         if not empty_slots:
-            target_dt = datetime.datetime.now() + datetime.timedelta(days=15)
+            _, _, interval_h, _ = self.get_schedule_cadence()
+            last_post = (
+                self.db.query(ScheduledPost)
+                .filter(ScheduledPost.destination_channel_id == destination_channel_id)
+                .filter(ScheduledPost.status.in_(["pending", "awaiting_oauth", "scheduled_on_youtube", "published"]))
+                .order_by(ScheduledPost.scheduled_for.desc())
+                .first()
+            )
+            base_ref = last_post.scheduled_for if (last_post and last_post.scheduled_for) else datetime.datetime.now()
+            target_dt = base_ref + datetime.timedelta(hours=interval_h)
         else:
             target_dt = empty_slots[0]
 

@@ -385,6 +385,16 @@ class ChannelExperimentEngine:
         if not include_analyzed:
             candidates = [c for c in candidates if _has_valid_rendered_file(c)]
 
+        # Carrega horários já ocupados neste canal para NUNCA agendar 2 vídeos no mesmo horário
+        occupied_dts = [
+            p.scheduled_for
+            for p in self.db.query(ScheduledPost)
+            .filter(ScheduledPost.destination_channel_id == exp.destination_channel_id)
+            .filter(ScheduledPost.status.in_(["pending", "awaiting_oauth", "scheduled_on_youtube", "published"]))
+            .all()
+            if p.scheduled_for
+        ]
+
         assigned_count = 0
         for slot in plan:
             if slot.get("post_id"):
@@ -397,6 +407,19 @@ class ChannelExperimentEngine:
                 self._apply_variant_to_clip(clip, slot, apply_seo=True)
 
             slot_dt = datetime.datetime.fromisoformat(slot["scheduled_for"])
+            # Se já existe vídeo agendado nesse horário (±60 min), empurra para depois até achar horário livre
+            guard = 0
+            while any(abs((slot_dt - occ).total_seconds()) < 3600 for occ in occupied_dts) and guard < 72:
+                slot_dt += datetime.timedelta(hours=2)
+                guard += 1
+
+            # Atualiza o slot do plano com o horário real livre escolhido
+            slot["scheduled_for"] = slot_dt.isoformat()
+            slot["time"] = slot_dt.strftime("%H:%M")
+            slot["date"] = slot_dt.strftime("%d/%m/%Y")
+            slot["day_name"] = PT_BR_WEEKDAYS[slot_dt.weekday()]
+            occupied_dts.append(slot_dt)
+
             variant_payload = {
                 "day_index": slot["day_index"],
                 "time": slot["time"],
