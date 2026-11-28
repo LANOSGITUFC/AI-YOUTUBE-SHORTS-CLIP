@@ -32,6 +32,7 @@ from app.services.subtitles import OPUS_CAPTION_PRESETS
 from app.services.scheduler import PostScheduler
 from app.services.experiments import ChannelExperimentEngine, get_experiment_catalog
 from app.services.priority import ranked_channels
+from app.services import dest_weights
 from app.services.pipeline_worker import PipelineWorker
 from app.services.render_guard import RenderBusyError
 from app.services.auth_youtube import YouTubeAuthManager, get_client_secrets_path
@@ -1554,8 +1555,72 @@ def list_destination_channels(db: Session = Depends(get_db)):
             "default_tags": c.default_tags or "",
             "scheduled_count": scheduled_posts_count,
             "is_active": bool(c.is_active),
+            "paused_weight": c.paused_weight,
         })
     return out
+
+
+def _weights_snapshot(db: Session) -> Dict[str, Any]:
+    rows = db.query(DestinationChannel).order_by(DestinationChannel.id.asc()).all()
+    return {
+        "weights": {str(r.id): int(r.weight or 0) for r in rows},
+        "active_total": sum(int(r.weight or 0) for r in rows if r.is_active),
+    }
+
+
+@app.post("/api/destination-channels/weights/fill")
+def fill_destination_weights(db: Session = Depends(get_db)):
+    """Completa o que falta para 100% entre os canais ativos, na proporção dos pesos atuais."""
+    if not dest_weights.fill_to_100(db):
+        raise HTTPException(status_code=400, detail="Nenhum canal ativo para receber peso.")
+    db.commit()
+    return {"success": True, **_weights_snapshot(db)}
+
+
+@app.post("/api/destination-channels/weights/equal")
+def split_destination_weights_equally(db: Session = Depends(get_db)):
+    """Divide 100% igualmente entre os canais ativos (sobra do arredondamento vai para os primeiros)."""
+    if not dest_weights.split_equally(db):
+        raise HTTPException(status_code=400, detail="Nenhum canal ativo para dividir o peso.")
+    db.commit()
+    return {"success": True, **_weights_snapshot(db)}
+
+
+@app.delete("/api/destination-channels/{channel_id}")
+def delete_destination_channel(channel_id: int, db: Session = Depends(get_db)):
+    """
+    Remove a conta do sistema: apaga os agendamentos e experimentos dela, devolve o peso aos
+    outros canais ativos e tira o token OAuth de data/tokens (movido para data/tokens/removidos/,
+    senão a recuperação automática de tokens recriaria a conta no próximo início).
+    """
+    ch = db.query(DestinationChannel).filter(DestinationChannel.id == channel_id).first()
+    if not ch:
+        raise HTTPException(status_code=404, detail="Canal de destino não encontrado.")
+
+    name = ch.name
+    token_moved_to = None
+    token_path = ch.oauth_credentials_path
+    if token_path and os.path.isfile(token_path):
+        removed_dir = os.path.join(os.path.dirname(os.path.abspath(token_path)), "removidos")
+        os.makedirs(removed_dir, exist_ok=True)
+        dest = os.path.join(removed_dir, f"{uuid.uuid4().hex[:8]}_{os.path.basename(token_path)}")
+        shutil.move(token_path, dest)
+        token_moved_to = dest
+
+    posts_removed = db.query(ScheduledPost).filter(ScheduledPost.destination_channel_id == channel_id).delete(synchronize_session=False)
+    db.query(ChannelExperiment).filter(ChannelExperiment.destination_channel_id == channel_id).delete(synchronize_session=False)
+    db.delete(ch)
+    db.flush()
+    dest_weights.release_weight_of_removed(db, channel_id)
+    db.commit()
+    return {
+        "success": True,
+        "id": channel_id,
+        "name": name,
+        "scheduled_posts_removed": posts_removed,
+        "token_moved_to": token_moved_to,
+        **_weights_snapshot(db),
+    }
 
 
 @app.put("/api/destination-channels/weights")
@@ -1611,9 +1676,13 @@ def toggle_destination_channel(channel_id: int, db: Session = Depends(get_db)):
     ch = db.query(DestinationChannel).filter(DestinationChannel.id == channel_id).first()
     if not ch:
         raise HTTPException(status_code=404, detail="Canal de destino não encontrado.")
-    ch.is_active = not bool(ch.is_active)
+    # Pausar reparte o peso entre os ativos; reativar devolve o peso guardado e reajusta os outros.
+    if ch.is_active:
+        dest_weights.pause_channel(db, ch)
+    else:
+        dest_weights.resume_channel(db, ch)
     db.commit()
-    return {"id": ch.id, "is_active": ch.is_active}
+    return {"id": ch.id, "is_active": ch.is_active, **_weights_snapshot(db)}
 
 
 @app.get("/api/auth/youtube/login")

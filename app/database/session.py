@@ -82,6 +82,8 @@ def init_db():
             dest_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(destination_channels)")).fetchall()]
             if dest_cols and "weight" not in dest_cols:
                 conn.execute(text("ALTER TABLE destination_channels ADD COLUMN weight INTEGER NOT NULL DEFAULT 100"))
+            if dest_cols and "paused_weight" not in dest_cols:
+                conn.execute(text("ALTER TABLE destination_channels ADD COLUMN paused_weight INTEGER"))
 
             src_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(source_channels)")).fetchall()]
             if src_cols and "priority_rank" not in src_cols:
