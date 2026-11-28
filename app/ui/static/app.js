@@ -1057,7 +1057,11 @@ async function loadSettingsIntoUI() {
       document.getElementById('presetEnableSubs').checked = p.enable_subtitles !== false;
       document.getElementById('presetUppercase').checked = p.uppercase !== false;
       document.getElementById('presetEnableVfx').checked = p.enable_vfx !== false;
+      if (document.getElementById('presetLanguage')) document.getElementById('presetLanguage').value = p.caption_language || 'auto';
+      if (document.getElementById('presetOutlineWidth')) document.getElementById('presetOutlineWidth').value = p.outline_width ?? 6;
+      if (p.preset_id) selectedPresetId = p.preset_id;
       updatePresetPreview();
+      loadTranscriptionStatus();
     }
   } catch (e) {
     console.error(e);
@@ -1096,24 +1100,102 @@ function updatePresetPreview() {
 
   const sub = document.getElementById('previewSubtitle');
   if (!sub) return;
+  const outlineW = Number(document.getElementById('presetOutlineWidth')?.value ?? 6);
+  setText('outlineWidthVal', outlineW);
+  const frame = document.getElementById('phoneFramePreview');
+  // Escala real do preview: altura do celular na tela / 1920px do vídeo
+  const scale = frame && frame.clientHeight ? frame.clientHeight / 1920 : 0.25;
+  const big = styleMode === 'single_word' ? 1.18 : 1;
   sub.style.display = enableSubs ? 'block' : 'none';
-  // Escala de 1920px -> 480px (fator 0.25)
-  sub.style.bottom = `${Math.round(marginV * 0.25)}px`;
-  sub.style.fontSize = `${Math.max(12, Math.round(fontSize * 0.27))}px`;
+  sub.style.bottom = `${Math.round(marginV * scale)}px`;
+  sub.style.fontSize = `${Math.max(11, Math.round(fontSize * big * scale * 1.08))}px`;
   sub.style.color = primary;
   sub.style.textTransform = uppercase ? 'uppercase' : 'none';
+  const fontName = document.getElementById('presetFontName')?.value || 'auto';
+  sub.style.fontFamily = fontName === 'auto' ? '' : `"${fontName}", var(--font-sans, sans-serif)`;
   sub.style.background = styleMode === 'box_caption' ? 'rgba(0,0,0,0.72)' : 'transparent';
   sub.style.padding = styleMode === 'box_caption' ? '6px 10px' : '0';
   sub.style.borderRadius = styleMode === 'box_caption' ? '6px' : '0';
-  sub.style.textShadow = styleMode === 'clean_minimal'
+  const ow = Math.max(0, Math.round(outlineW * scale * 1.3 * 10) / 10);
+  sub.style.textShadow = styleMode === 'clean_minimal' || ow === 0
     ? `0 2px 4px ${outline}`
-    : `-2px -2px 0 ${outline}, 2px -2px 0 ${outline}, -2px 2px 0 ${outline}, 2px 2px 0 ${outline}, 0 3px 6px rgba(0,0,0,0.85)`;
+    : `-${ow}px -${ow}px 0 ${outline}, ${ow}px -${ow}px 0 ${outline}, -${ow}px ${ow}px 0 ${outline}, ${ow}px ${ow}px 0 ${outline}, 0 ${ow + 1}px ${ow * 2 + 2}px rgba(0,0,0,0.85)`;
 
-  const activeWord = document.getElementById('previewActiveWord');
-  if (activeWord) {
-    activeWord.style.color = (styleMode === 'word_highlight' || styleMode === 'karaoke_pop') ? highlight : primary;
-    activeWord.style.display = 'inline-block';
-    activeWord.style.transform = styleMode === 'karaoke_pop' ? 'scale(1.12)' : 'scale(1)';
+  captionPreviewState.mode = styleMode;
+  captionPreviewState.primary = primary;
+  captionPreviewState.highlight = highlight;
+  captionPreviewState.wordsPerLine = Math.max(1, Number(document.getElementById('presetWordsPerLine').value) || 3);
+  captionPreviewState.language = document.getElementById('presetLanguage')?.value || 'auto';
+  startCaptionPreviewLoop();
+}
+
+/* Prévia animada das legendas: simula a fala palavra a palavra no celular do preview */
+var CAPTION_DEMO = {
+  pt: 'olha esse clutch absurdo no finalzinho da partida mano',
+  en: 'look at this insane clutch right at the end of the match',
+};
+var captionPreviewState = { idx: 0, timer: null, mode: 'word_highlight', primary: '#FFFFFF', highlight: '#FACC15', wordsPerLine: 3, language: 'auto' };
+
+function renderCaptionPreviewFrame() {
+  const sub = document.getElementById('previewSubtitle');
+  if (!sub) return;
+  const st = captionPreviewState;
+  const words = (st.language === 'en' ? CAPTION_DEMO.en : CAPTION_DEMO.pt).split(' ');
+  const i = st.idx % words.length;
+  const per = st.mode === 'single_word' ? 1 : st.wordsPerLine;
+  const chunkStart = Math.floor(i / per) * per;
+  const chunk = words.slice(chunkStart, chunkStart + per);
+  const activeInChunk = i - chunkStart;
+  const pop = ['karaoke_pop', 'word_reveal', 'single_word'].includes(st.mode);
+  const highlightOn = st.mode !== 'clean_minimal';
+  const visible = st.mode === 'word_reveal' ? chunk.slice(0, activeInChunk + 1) : chunk;
+
+  sub.replaceChildren(...visible.map((w, j) => {
+    const span = document.createElement('span');
+    const isActive = j === activeInChunk;
+    span.className = 'cap-word' + (isActive ? ' is-active' : '') + (isActive && pop ? ' pop' : '');
+    span.textContent = w;
+    span.style.color = isActive && highlightOn ? st.highlight : st.primary;
+    return span;
+  }));
+  st.idx = (i + 1) % words.length;
+}
+
+function startCaptionPreviewLoop() {
+  renderCaptionPreviewFrame();
+  if (captionPreviewState.timer) return;
+  captionPreviewState.timer = setInterval(() => {
+    const view = document.getElementById('view-presets');
+    if (view && !view.classList.contains('active')) return;
+    renderCaptionPreviewFrame();
+  }, 380);
+}
+
+window.addEventListener('resize', () => {
+  if (document.getElementById('previewSubtitle')) updatePresetPreview();
+});
+
+async function loadTranscriptionStatus() {
+  const textEl = document.getElementById('transcribeStatusText');
+  const dot = document.getElementById('transcribeDot');
+  if (!textEl || !dot) return;
+  try {
+    const res = await fetch('/api/transcription/status');
+    const st = await res.json();
+    const engines = [];
+    if (st.groq) engines.push('Groq Whisper');
+    if (st.openai) engines.push('OpenAI Whisper');
+    if (st.faster_whisper) engines.push('Whisper local');
+    if (st.any) {
+      dot.className = 'transcribe-dot ok';
+      textEl.textContent = `Transcrição automática ativa (${engines.join(' + ')}). Todo clipe novo recebe legenda sincronizada sozinho.`;
+    } else {
+      dot.className = 'transcribe-dot warn';
+      textEl.textContent = 'Sem motor de transcrição: só vídeos com legenda do YouTube terão legenda. Coloque a chave grátis da Groq (GROQ_API_KEY) em Configurações.';
+    }
+  } catch (e) {
+    dot.className = 'transcribe-dot warn';
+    textEl.textContent = 'Não consegui verificar o motor de transcrição.';
   }
 }
 
@@ -1126,8 +1208,10 @@ async function saveStudioPreset() {
       primary_color: document.getElementById('presetPrimaryColor').value,
       highlight_color: document.getElementById('presetHighlightColor').value,
       outline_color: document.getElementById('presetOutlineColor').value,
-      outline_width: 6,
+      outline_width: Number(document.getElementById('presetOutlineWidth')?.value ?? 6),
       shadow_depth: 3,
+      caption_language: document.getElementById('presetLanguage')?.value || 'auto',
+      preset_id: selectedPresetId || undefined,
       margin_v: Number(document.getElementById('presetMarginV').value),
       words_per_line: Number(document.getElementById('presetWordsPerLine').value),
       uppercase: document.getElementById('presetUppercase').checked,
@@ -1883,6 +1967,7 @@ function applyOpusPreset(presetId) {
   if (document.getElementById('presetFontSize')) document.getElementById('presetFontSize').value = p.fontSize;
   if (document.getElementById('presetWordsPerLine')) document.getElementById('presetWordsPerLine').value = String(p.wordsPerLine);
   if (document.getElementById('presetUppercase')) document.getElementById('presetUppercase').checked = Boolean(p.upper);
+  if (document.getElementById('presetOutlineWidth')) document.getElementById('presetOutlineWidth').value = p.outlinePx ?? 6;
   if (document.getElementById('presetStyleMode')) {
     document.getElementById('presetStyleMode').value = p.borderStyle === 3
       ? 'box_caption'
@@ -2335,6 +2420,34 @@ async function exportClipsBatchZip() {
   }
 }
 
+const WORDS_SOURCE_LABEL = {
+  custom: 'Editadas por você',
+  video_transcript: 'Transcrição do vídeo',
+  none: 'Sem transcrição',
+};
+
+function wordsSourceLabel(src, lang) {
+  let label = WORDS_SOURCE_LABEL[src] || (String(src || '').includes('whisper') ? 'Whisper automático' : (src || '—'));
+  if (lang && lang !== 'auto') label += ` · ${String(lang).toUpperCase()}`;
+  return label;
+}
+
+function renderWordsEditorList() {
+  const listEl = document.getElementById('wordsEditorList');
+  if (!listEl) return;
+  if (!wordsEditorBuffer.length) {
+    listEl.innerHTML = '<div class="empty-state">Nenhuma palavra transcrita nesta janela ainda. Clique em "Transcrever de novo" ou renderize o clipe (a transcrição é automática no render).</div>';
+  } else {
+    listEl.innerHTML = wordsEditorBuffer.map((w, i) => `
+      <div style="display:flex; flex-direction:column; gap:2px; background:#141418; border:1px solid #26262e; border-radius:8px; padding:6px;">
+        <input type="text" class="input" style="width:110px; max-width:100%; padding:4px 6px; font-size:12px;" value="${esc(w.word)}" oninput="wordsEditorBuffer[${i}].word = this.value">
+        <span style="font-size:10px; color:var(--text-muted); font-family:'JetBrains Mono',monospace;">${Number(w.start).toFixed(1)}s</span>
+      </div>
+    `).join('');
+  }
+  setText('wordsEditorTitle', `Legendas Palavra por Palavra — Clipe #${wordsEditorClipId} (${wordsEditorBuffer.length} palavras)`);
+}
+
 async function openWordsEditorForEditClip() {
   const clipId = Number(document.getElementById('editClipId')?.value || 0);
   if (!clipId) return;
@@ -2343,23 +2456,40 @@ async function openWordsEditorForEditClip() {
     const res = await fetch(`/api/clips/${clipId}/words`);
     const data = await res.json();
     wordsEditorBuffer = Array.isArray(data.words) ? data.words : [];
-    const listEl = document.getElementById('wordsEditorList');
-    if (listEl) {
-      if (!wordsEditorBuffer.length) {
-        listEl.innerHTML = '<div class="empty-state">Nenhuma palavra transcrita encontrada nesta janela do clipe.</div>';
-      } else {
-        listEl.innerHTML = wordsEditorBuffer.map((w, i) => `
-          <div style="display:flex; flex-direction:column; gap:2px; background:#141418; border:1px solid #26262e; border-radius:8px; padding:6px;">
-            <input type="text" class="input" style="width:110px; padding:4px 6px; font-size:12px;" value="${esc(w.word)}" oninput="wordsEditorBuffer[${i}].word = this.value">
-            <span style="font-size:10px; color:var(--text-muted); font-family:'JetBrains Mono',monospace;">${Number(w.start).toFixed(1)}s</span>
-          </div>
-        `).join('');
-      }
-    }
-    setText('wordsEditorTitle', `Legendas Palavra por Palavra — Clipe #${clipId} (${wordsEditorBuffer.length} palavras)`);
+    setText('wordsEditorSource', wordsSourceLabel(data.source, data.language));
+    const langSel = document.getElementById('wordsEditorLanguage');
+    if (langSel) langSel.value = '';
+    renderWordsEditorList();
     openModal('wordsEditorModal');
   } catch (e) {
     showToast('Erro ao carregar palavras do clipe.', 'error');
+  }
+}
+
+async function retranscribeWordsEditor() {
+  if (!wordsEditorClipId) return;
+  const btn = document.getElementById('wordsRetranscribeBtn');
+  const language = document.getElementById('wordsEditorLanguage')?.value || '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Transcrevendo...'; }
+  try {
+    const res = await fetch(`/api/clips/${wordsEditorClipId}/transcribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(language ? { language } : {}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Não consegui transcrever o clipe.', 'error');
+      return;
+    }
+    wordsEditorBuffer = Array.isArray(data.words) ? data.words : [];
+    setText('wordsEditorSource', wordsSourceLabel(data.source, data.language));
+    renderWordsEditorList();
+    showToast(`${wordsEditorBuffer.length} palavras transcritas. Revise e clique em salvar para usar no vídeo.`, 'success');
+  } catch (e) {
+    showToast('Erro de rede ao transcrever.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Transcrever de novo'; }
   }
 }
 
