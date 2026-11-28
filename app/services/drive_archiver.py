@@ -167,6 +167,13 @@ class DriveArchiver:
             os.remove(local_path)
             freed_mb = size_mb
             video.video_path = None
+            if video.audio_path and os.path.exists(video.audio_path):
+                try:
+                    freed_mb = round(freed_mb + os.path.getsize(video.audio_path) / (1024 * 1024), 1)
+                    os.remove(video.audio_path)
+                    video.audio_path = None
+                except OSError:
+                    pass
             self.db.commit()
 
         idx = self._load_index()

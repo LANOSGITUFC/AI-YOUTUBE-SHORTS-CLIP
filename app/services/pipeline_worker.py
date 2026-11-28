@@ -302,6 +302,46 @@ class PipelineWorker:
                             self._log("error", f"Erro no upload do post #{post.id}: {e}")
                         break
 
+                # 6. Auto-Arquivar no Google Drive (automático assim que todos os clipes da live já foram renderizados!)
+                try:
+                    auto_row = db.query(SystemSetting).filter(SystemSetting.key == "AUTO_ARCHIVE_DRIVE").first()
+                    auto_drive_on = (not auto_row) or (str(auto_row.value or "true").strip().lower() not in ("false", "0", "no", "nao"))
+                    if auto_drive_on:
+                        from app.services.drive_archiver import DriveArchiver
+                        archiver = DriveArchiver(db)
+                        st = archiver.get_storage_status()
+                        if st.get("gdrive_oauth_connected") or (st.get("rclone_remote") and st.get("rclone_available")):
+                            processed_vids = (
+                                db.query(SourceVideo)
+                                .filter(SourceVideo.status == "processed")
+                                .filter(SourceVideo.video_path.isnot(None))
+                                .order_by(SourceVideo.created_at.asc())
+                                .all()
+                            )
+                            for pv in processed_vids:
+                                if not pv.video_path or not os.path.isfile(pv.video_path):
+                                    continue
+                                pending_clips_cnt = (
+                                    db.query(ClipSegment)
+                                    .filter(ClipSegment.video_id == pv.id)
+                                    .filter(ClipSegment.status == "analyzed")
+                                    .count()
+                                )
+                                if pending_clips_cnt > 0:
+                                    continue  # Ainda tem clipes dessa live aguardando renderização
+                                self._log("info", f"Arquivando live no Google Drive: {pv.title[:50]}", stage="archiving", progress=98)
+                                arc_res = archiver.archive_video(pv.id, delete_local_after=True)
+                                results["archived_drive"] = results.get("archived_drive", 0) + 1
+                                self._log(
+                                    "success",
+                                    f"Live arquivada no Google Drive ({arc_res.get('freed_mb', 0)} MB liberados): {pv.title[:45]}",
+                                    stage="archiving",
+                                    progress=99,
+                                )
+                                break  # 1 live por ciclo para não travar a esteira
+                except Exception as e:
+                    self._log("error", f"Erro no auto-arquivo para Google Drive: {e}")
+
             self._state["last_run_at"] = datetime.datetime.now().isoformat()
             self._log("info", "Ciclo concluído. Aguardando próxima execução.", stage="idle", progress=100)
             return results
