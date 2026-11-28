@@ -161,6 +161,13 @@ class YouTubeUploader:
             raise FileNotFoundError(
                 f"Arquivo MP4 válido do clipe #{post.clip_id} não existe no disco. Renderize o clipe antes do upload."
             )
+        from app.services.render_guard import is_rendering, validate_mp4
+        if is_rendering(clip.id):
+            raise RuntimeError(f"Clipe #{clip.id} está renderizando agora; o upload fica para a próxima volta.")
+        if not validate_mp4(clip.clip_path, deep=True):
+            raise FileNotFoundError(
+                f"MP4 do clipe #{clip.id} está corrompido (reprovado no ffprobe). Renderize o clipe de novo antes do upload."
+            )
 
         # Se o prazo já passou e ainda não foi postado, realoca para o próximo slot futuro
         if post.scheduled_for <= datetime.datetime.now() and not post.youtube_video_id:
