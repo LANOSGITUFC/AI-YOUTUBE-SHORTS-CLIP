@@ -9,11 +9,14 @@ import re
 import json
 import uuid
 import asyncio
+import logging
 import threading
 import subprocess
 import urllib.request
 import shutil
 from typing import Dict, Any, Optional
+
+logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse, FileResponse, Response

@@ -66,7 +66,7 @@ def fetch_channel_youtube_timeline(
             with open(token_path, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
 
-        youtube = build("youtube", "v3", credentials=creds)
+        youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
         ch_resp = youtube.channels().list(part="contentDetails", mine=True).execute()
         items = ch_resp.get("items") or []
         if not items:
@@ -262,7 +262,7 @@ class YouTubeUploader:
                 with open(channel.oauth_credentials_path, "w", encoding="utf-8") as f:
                     json.dump(creds_data, f, indent=2)
 
-            youtube = build("youtube", "v3", credentials=creds)
+            youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
 
             body = {
                 "snippet": {
