@@ -1321,8 +1321,9 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
 /* Celular: topo quebra em duas linhas e nada passa da largura da tela */
 @media (max-width: 640px) {
   .topbar { height: auto; flex-wrap: wrap; padding: 10px 14px; gap: 8px; }
-  .quick-import-form { order: 3; flex-basis: 100%; max-width: none; }
-  .quick-import-input { min-width: 0; }
+  .quick-import-form { order: 3; flex-basis: 100%; width: 100%; max-width: 100%; flex-wrap: wrap; }
+  .quick-import-input { min-width: 0; flex: 1 1 100%; width: 100%; }
+  .quick-import-form .btn { flex: 1 1 0; justify-content: center; min-width: 0; }
   .calendar-grid { max-width: 100%; }
 }
 

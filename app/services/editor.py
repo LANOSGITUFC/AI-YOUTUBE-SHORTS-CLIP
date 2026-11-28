@@ -14,7 +14,9 @@ Motor de renderização completo portado com o melhor do OpusClip & 2Short.ai:
 import os
 import re
 import json
+import uuid
 import logging
+import threading
 import subprocess
 from typing import Dict, Any, Optional, List, Tuple
 from sqlalchemy.orm import Session
@@ -28,6 +30,19 @@ CLIPS_DIR = "./data/clips"
 THUMBNAILS_DIR = "./data/thumbnails"
 
 logger = logging.getLogger("VideoEditor")
+
+_CLIP_RENDER_LOCKS_GUARD = threading.Lock()
+_CLIP_RENDER_LOCKS: Dict[int, threading.Lock] = {}
+
+
+def get_clip_render_lock(clip_id: int) -> threading.Lock:
+    """Retorna um lock exclusivo por clipe para impedir dois FFmpegs gravando o mesmo MP4."""
+    with _CLIP_RENDER_LOCKS_GUARD:
+        lock = _CLIP_RENDER_LOCKS.get(clip_id)
+        if lock is None:
+            lock = threading.Lock()
+            _CLIP_RENDER_LOCKS[clip_id] = lock
+        return lock
 
 
 def _escape_ffmpeg_filter_path(path: str) -> str:
@@ -173,6 +188,22 @@ class VideoEditor:
         shake_windows: Optional[list] = None,
         style_override: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        with get_clip_render_lock(clip_id):
+            return self._render_clip_locked(
+                clip_id=clip_id,
+                enable_vfx=enable_vfx,
+                shake_windows=shake_windows,
+                style_override=style_override,
+            )
+
+    def _render_clip_locked(
+        self,
+        clip_id: int,
+        enable_vfx: Optional[bool] = None,
+        shake_windows: Optional[list] = None,
+        style_override: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        self.db.expire_all()
         clip = self.db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
         if not clip:
             raise ValueError(f"Clipe #{clip_id} não encontrado.")
@@ -263,12 +294,9 @@ class VideoEditor:
         clip_output_path = os.path.abspath(os.path.join(CLIPS_DIR, f"clip_{clip_id}.mp4"))
         thumbnail_output_path = os.path.abspath(os.path.join(THUMBNAILS_DIR, f"thumb_{clip_id}.jpg"))
         ass_subtitles_path = os.path.abspath(os.path.join(CLIPS_DIR, f"sub_{clip_id}.ass"))
-
-        if os.path.exists(clip_output_path):
-            try:
-                os.remove(clip_output_path)
-            except OSError:
-                pass
+        render_nonce = uuid.uuid4().hex[:8]
+        tmp_clip_path = os.path.abspath(os.path.join(CLIPS_DIR, f"clip_{clip_id}.tmp.{render_nonce}.mp4"))
+        tmp_thumb_path = os.path.abspath(os.path.join(THUMBNAILS_DIR, f"thumb_{clip_id}.tmp.{render_nonce}.jpg"))
 
         # 1. Palavras da transcrição (prioriza palavras editadas/com AI Emojis do editor)
         words_data = []
@@ -427,69 +455,81 @@ class VideoEditor:
             bgm_ducking=bgm_ducking,
         )
 
-        # Execução principal
-        cmd = self._build_ffmpeg_command(
-            input_path=video.video_path,
-            start_time=start_sec,
-            duration=duration,
-            vf_filter=filter_complex,
-            v_map=v_out,
-            a_map=a_out,
-            output_path=clip_output_path,
-            has_audio=has_audio or bool(bgm_path),
-            normalize_audio=(a_out == "0:a:0?"),
-            bgm_path=bgm_path,
-        )
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-
-        # Fallback 1: layout + legendas ASS (sem efeitos pesados)
-        if res.returncode != 0 or not self._is_valid_mp4(clip_output_path):
-            logger.warning("Render principal falhou para clipe #%s (tentando layout + legenda): %s", clip_id, (res.stderr or "")[-500:])
-            base_f = self._build_base_layout_filter(crop_mode, facecam_box, framing)
-            if use_subtitles and os.path.exists(ass_subtitles_path):
-                escaped_ass = _escape_ffmpeg_filter_path(ass_subtitles_path)
-                base_f = self.effects_engine.merge_into_filter_chain(base_f, f"ass=filename='{escaped_ass}'")
-            fb1 = self._build_ffmpeg_command(
+        try:
+            # Execução principal (grava em arquivo temporário atômico)
+            cmd = self._build_ffmpeg_command(
                 input_path=video.video_path,
                 start_time=start_sec,
                 duration=duration,
-                vf_filter=base_f,
-                v_map="[v]",
-                a_map="0:a:0?",
-                output_path=clip_output_path,
-                has_audio=has_audio,
-                normalize_audio=False,
+                vf_filter=filter_complex,
+                v_map=v_out,
+                a_map=a_out,
+                output_path=tmp_clip_path,
+                has_audio=has_audio or bool(bgm_path),
+                normalize_audio=(a_out == "0:a:0?"),
+                bgm_path=bgm_path,
             )
-            res = subprocess.run(fb1, capture_output=True, text=True, timeout=600)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
-        # Fallback 2: layout puro 9:16
-        if res.returncode != 0 or not self._is_valid_mp4(clip_output_path):
-            logger.warning("Fallback 1 falhou para clipe #%s (tentando layout puro 9:16): %s", clip_id, (res.stderr or "")[-500:])
-            pure_f = self._build_base_layout_filter(crop_mode, facecam_box, framing)
-            fb2 = self._build_ffmpeg_command(
-                input_path=video.video_path,
-                start_time=start_sec,
-                duration=duration,
-                vf_filter=pure_f,
-                v_map="[v]",
-                a_map="0:a:0?",
-                output_path=clip_output_path,
-                has_audio=has_audio,
-                normalize_audio=False,
+            # Fallback 1: layout + legendas ASS (sem efeitos pesados)
+            if res.returncode != 0 or not self._is_valid_mp4(tmp_clip_path):
+                logger.warning("Render principal falhou para clipe #%s (tentando layout + legenda): %s", clip_id, (res.stderr or "")[-500:])
+                base_f = self._build_base_layout_filter(crop_mode, facecam_box, framing)
+                if use_subtitles and os.path.exists(ass_subtitles_path):
+                    escaped_ass = _escape_ffmpeg_filter_path(ass_subtitles_path)
+                    base_f = self.effects_engine.merge_into_filter_chain(base_f, f"ass=filename='{escaped_ass}'")
+                fb1 = self._build_ffmpeg_command(
+                    input_path=video.video_path,
+                    start_time=start_sec,
+                    duration=duration,
+                    vf_filter=base_f,
+                    v_map="[v]",
+                    a_map="0:a:0?",
+                    output_path=tmp_clip_path,
+                    has_audio=has_audio,
+                    normalize_audio=False,
+                )
+                res = subprocess.run(fb1, capture_output=True, text=True, timeout=600)
+
+            # Fallback 2: layout puro 9:16
+            if res.returncode != 0 or not self._is_valid_mp4(tmp_clip_path):
+                logger.warning("Fallback 1 falhou para clipe #%s (tentando layout puro 9:16): %s", clip_id, (res.stderr or "")[-500:])
+                pure_f = self._build_base_layout_filter(crop_mode, facecam_box, framing)
+                fb2 = self._build_ffmpeg_command(
+                    input_path=video.video_path,
+                    start_time=start_sec,
+                    duration=duration,
+                    vf_filter=pure_f,
+                    v_map="[v]",
+                    a_map="0:a:0?",
+                    output_path=tmp_clip_path,
+                    has_audio=has_audio,
+                    normalize_audio=False,
+                )
+                res = subprocess.run(fb2, capture_output=True, text=True, timeout=600)
+
+            if not self._is_valid_mp4(tmp_clip_path):
+                err_tail = (res.stderr or "MP4 inválido ou corrompido (reprovado no ffprobe)")[-500:]
+                raise RuntimeError(f"Falha ao renderizar clipe #{clip_id}: {err_tail}")
+
+            # 6. Thumbnail vertical (gerado do MP4 validado antes da troca atômica)
+            thumb_time = max(0.1, min(eff_duration - 0.1, eff_duration / 2.0))
+            subprocess.run(
+                ["ffmpeg", "-y", "-ss", str(thumb_time), "-i", tmp_clip_path, "-vframes", "1", "-q:v", "2", tmp_thumb_path],
+                capture_output=True,
+                timeout=30,
             )
-            res = subprocess.run(fb2, capture_output=True, text=True, timeout=600)
 
-        if not self._is_valid_mp4(clip_output_path):
-            err_tail = (res.stderr or "Erro desconhecido do FFmpeg")[-500:]
-            raise RuntimeError(f"Falha ao renderizar clipe #{clip_id}: {err_tail}")
-
-        # 6. Thumbnail vertical
-        thumb_time = max(0.1, min(eff_duration - 0.1, eff_duration / 2.0))
-        subprocess.run(
-            ["ffmpeg", "-y", "-ss", str(thumb_time), "-i", clip_output_path, "-vframes", "1", "-q:v", "2", thumbnail_output_path],
-            capture_output=True,
-            timeout=30,
-        )
+            os.replace(tmp_clip_path, clip_output_path)
+            if os.path.exists(tmp_thumb_path) and os.path.getsize(tmp_thumb_path) > 0:
+                os.replace(tmp_thumb_path, thumbnail_output_path)
+        finally:
+            for leftover in (tmp_clip_path, tmp_thumb_path):
+                if os.path.exists(leftover):
+                    try:
+                        os.remove(leftover)
+                    except OSError:
+                        pass
 
         rel_clip_path = os.path.join(CLIPS_DIR, f"clip_{clip_id}.mp4")
         rel_thumb_path = os.path.join(THUMBNAILS_DIR, f"thumb_{clip_id}.jpg")
@@ -847,7 +887,43 @@ class VideoEditor:
 
     @staticmethod
     def _is_valid_mp4(path: str) -> bool:
-        return os.path.exists(path) and os.path.getsize(path) > 4096
+        if not path or not os.path.isfile(path) or os.path.getsize(path) <= 4096:
+            return False
+        try:
+            probe = subprocess.run(
+                [
+                    "ffprobe", "-v", "error",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=codec_name,width,height:format=duration",
+                    "-of", "json",
+                    path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if probe.returncode != 0:
+                logger.warning("ffprobe rejeitou MP4 %s (rc=%s): %s", path, probe.returncode, (probe.stderr or "").strip()[:300])
+                return False
+            stderr_low = (probe.stderr or "").lower()
+            if any(err in stderr_low for err in ("invalid nal", "moov atom not found", "invalid data", "corrupt", "error")):
+                logger.warning("ffprobe detectou corrupção em %s: %s", path, (probe.stderr or "").strip()[:300])
+                return False
+            data = json.loads(probe.stdout or "{}")
+            streams = data.get("streams") or []
+            if not streams:
+                return False
+            v0 = streams[0]
+            width = int(v0.get("width") or 0)
+            height = int(v0.get("height") or 0)
+            duration = float((data.get("format") or {}).get("duration") or 0.0)
+            return width > 0 and height > 0 and duration > 0.5
+        except FileNotFoundError:
+            # Ambiente sem ffprobe instalado: cai no fallback de tamanho mínimo
+            return True
+        except Exception as exc:
+            logger.warning("Falha ao validar MP4 %s com ffprobe: %s", path, exc)
+            return False
 
     @staticmethod
     def _has_audio_stream(video_path: str) -> bool:

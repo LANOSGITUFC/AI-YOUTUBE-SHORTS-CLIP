@@ -111,7 +111,7 @@ class TestShortsClipPipeline(unittest.TestCase):
         self.assertTrue(windows[0]["end"] <= 100.0)
 
     def test_02_scheduler_matrix(self):
-        """Testa agendamento dos 4 vídeos/dia para os próximos 7 dias (28 slots) com validação de MP4 real"""
+        """Testa agendamento na grade de 18h para os próximos 7 dias (8-10 slots) com validação de MP4 real"""
         dedup = DeduplicationEngine(self.db)
         scheduler = PostScheduler(self.db)
 
@@ -153,9 +153,11 @@ class TestShortsClipPipeline(unittest.TestCase):
             self.assertEqual(count, 3, "Deveria agendar apenas os 3 clipes com MP4 válido (> 4KB)")
 
             matrix_data = scheduler.get_calendar_matrix(self.dest.id, days=7)
-            self.assertEqual(matrix_data["total_slots"], 28)
+            # Cadência de 18h em 7 dias (168h / 18h ≈ 9 slots)
+            self.assertGreaterEqual(matrix_data["total_slots"], 8)
+            self.assertLessEqual(matrix_data["total_slots"], 10)
             self.assertEqual(matrix_data["filled_slots"], 3)
-            self.assertEqual(matrix_data["empty_slots"], 25)
+            self.assertEqual(matrix_data["empty_slots"], matrix_data["total_slots"] - 3)
             # Dias da semana em Português (PT-BR)
             pt_days = {"Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"}
             for day in matrix_data["matrix"]:
@@ -215,6 +217,47 @@ class TestShortsClipPipeline(unittest.TestCase):
             inbox = bus.get_inbox("claude-code", unread_only=True)
             self.assertTrue(len(inbox) >= 1)
             self.assertEqual(inbox[-1]["payload"]["msg"], "Hello Claude Code")
+
+    def test_06_render_lock_and_ffprobe_validation(self):
+        """Testa lock exclusivo por clipe e rejeição de MP4 corrompido via ffprobe"""
+        import shutil
+        import subprocess
+        from app.services.editor import VideoEditor, get_clip_render_lock
+
+        # 1. Mesmo clipe compartilha o mesmo lock; clipes diferentes têm locks distintos
+        lock_a1 = get_clip_render_lock(777)
+        lock_a2 = get_clip_render_lock(777)
+        lock_b = get_clip_render_lock(778)
+        self.assertIs(lock_a1, lock_a2)
+        self.assertIsNot(lock_a1, lock_b)
+
+        # 2. Arquivo > 4KB porém corrompido (bytes nulos) deve ser rejeitado pelo ffprobe
+        if shutil.which("ffprobe"):
+            corrupt_path = "./data/clips/_test_corrupt_mp4.mp4"
+            valid_path = "./data/clips/_test_valid_mp4.mp4"
+            try:
+                with open(corrupt_path, "wb") as f:
+                    f.write(b"\x00" * 16384)
+                self.assertFalse(VideoEditor._is_valid_mp4(corrupt_path))
+
+                if shutil.which("ffmpeg"):
+                    subprocess.run(
+                        [
+                            "ffmpeg", "-y",
+                            "-f", "lavfi", "-i", "testsrc=size=320x568:duration=1.5",
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                            "-movflags", "+faststart",
+                            valid_path,
+                        ],
+                        capture_output=True,
+                        check=True,
+                        timeout=30,
+                    )
+                    self.assertTrue(VideoEditor._is_valid_mp4(valid_path))
+            finally:
+                for p in (corrupt_path, valid_path):
+                    if os.path.exists(p):
+                        os.remove(p)
 
 if __name__ == "__main__":
     unittest.main()
