@@ -234,8 +234,8 @@ class VideoEditor:
         progress_bar = bool(ed_cfg.get("progress_bar", ed_cfg.get("progressBar", False)))
         headline_text = str(ed_cfg.get("headline_text") or "").strip()
         hook_enabled = bool(ed_cfg.get("hook_enabled", False))
-        hook_banner_text = str(ed_cfg.get("hook_banner_text") or (clip.hook_text if hook_enabled else "") or "").strip()
-        hook_duration = max(1.0, min(6.0, float(ed_cfg.get("hook_duration", 2.8) or 2.8)))
+        hook_banner_text = str(ed_cfg.get("hook_banner_text") or (clip.hook_text if hook_enabled else "") or "ESPERA ATÉ O FINAL").strip()
+        hook_duration = max(2.0, min(6.0, float(ed_cfg.get("hook_duration", 4.0) or 4.0)))
         remove_silences = bool(ed_cfg.get("remove_silences", ed_cfg.get("removeSilence", False)))
         watermark_text = str(ed_cfg.get("watermark_text") if ed_cfg.get("watermark_text") is not None else preset.get("watermark_text", "")).strip()
         watermark_pos = str(preset.get("watermark_position") or "top-right")
@@ -285,12 +285,60 @@ class VideoEditor:
             if kept_intervals:
                 eff_duration = max(1.0, sum(e - s for s, e in kept_intervals))
 
-        # 3. Gera arquivo de legenda .ass (remapeando timestamps se houve jump-cut)
+        # 2B. Gancho Cold-Open de 4 segundos (Teaser do clímax + Clipe completo <= 59.5s)
+        hook_teaser_window: Optional[Tuple[float, float]] = None
+        main_body_duration = eff_duration
+        if hook_enabled and eff_duration >= 10.0:
+            ts, te = self._pick_climax_teaser_window(
+                audio_path=video.audio_path,
+                clip_start=start_sec,
+                clip_duration=eff_duration,
+                teaser_duration=hook_duration,
+            )
+            hook_teaser_window = (ts, te)
+            actual_hook_dur = max(1.5, te - ts)
+            main_body_duration = min(eff_duration, max(8.0, 59.5 - actual_hook_dur))
+            eff_duration = actual_hook_dur + main_body_duration
+
+        # 3. Gera arquivo de legenda .ass (remapeando timestamps para jump-cut e/ou gancho de 4s)
         if kept_intervals:
-            remapped = remap_words_to_kept_intervals(words_data, start_sec, end_sec, kept_intervals)
+            base_words = remap_words_to_kept_intervals(words_data, start_sec, end_sec, kept_intervals)
+            base_start = 0.0
+        else:
+            base_words = []
+            for w in words_data:
+                try:
+                    ws = float(w.get("start", 0)) - start_sec
+                    we = float(w.get("end", 0)) - start_sec
+                    if we >= 0.0 and ws <= duration:
+                        base_words.append({**w, "start": max(0.0, ws), "end": max(0.05, we)})
+                except Exception:
+                    continue
+            base_start = 0.0
+
+        if hook_teaser_window:
+            ts, te = hook_teaser_window
+            actual_hook_dur = max(1.5, te - ts)
+            shifted_words = []
+            # Palavras do próprio teaser de 4s (0..4s)
+            for w in base_words:
+                if w["end"] >= ts and w["start"] <= te:
+                    shifted_words.append({
+                        **w,
+                        "start": max(0.0, round(w["start"] - ts, 3)),
+                        "end": min(actual_hook_dur, round(w["end"] - ts, 3)),
+                    })
+            # Palavras do clipe principal deslocadas por +4s
+            for w in base_words:
+                if w["start"] <= main_body_duration:
+                    shifted_words.append({
+                        **w,
+                        "start": round(w["start"] + actual_hook_dur, 3),
+                        "end": round(min(main_body_duration, w["end"]) + actual_hook_dur, 3),
+                    })
             self.subtitle_engine.generate_ass_file(
                 clip_id=clip.id,
-                words_data=remapped,
+                words_data=shifted_words,
                 clip_start=0.0,
                 clip_end=eff_duration,
                 output_path=ass_subtitles_path,
@@ -300,9 +348,9 @@ class VideoEditor:
         else:
             self.subtitle_engine.generate_ass_file(
                 clip_id=clip.id,
-                words_data=words_data,
-                clip_start=start_sec,
-                clip_end=end_sec,
+                words_data=base_words,
+                clip_start=base_start,
+                clip_end=eff_duration,
                 output_path=ass_subtitles_path,
                 style_config=preset,
                 fallback_text=clip.hook_text or "",
@@ -355,6 +403,8 @@ class VideoEditor:
             headline_text=headline_text,
             hook_banner_text=hook_banner_text if hook_enabled else "",
             hook_duration=hook_duration,
+            hook_teaser_window=hook_teaser_window,
+            main_body_duration=main_body_duration,
             ass_path=ass_subtitles_path if use_subtitles else None,
             watermark_text=watermark_text,
             watermark_pos=watermark_pos,
@@ -452,6 +502,63 @@ class VideoEditor:
             "silences_removed": bool(kept_intervals),
         }
 
+    @staticmethod
+    def _pick_climax_teaser_window(
+        audio_path: Optional[str],
+        clip_start: float,
+        clip_duration: float,
+        teaser_duration: float = 4.0,
+    ) -> Tuple[float, float]:
+        """
+        Escolhe o melhor trecho de 4s do clímax (entre 45% e 84% do clipe) usando pico acústico RMS
+        real do WAV quando disponível, ou 62% da duração como fallback.
+        """
+        td = max(2.0, min(teaser_duration, clip_duration * 0.35))
+        search_start = max(1.0, clip_duration * 0.45)
+        search_end = max(search_start + td, clip_duration * 0.86)
+        best_rel = min(max(search_start, clip_duration * 0.62), max(0.0, clip_duration - td))
+
+        if audio_path and os.path.isfile(audio_path):
+            try:
+                import wave
+                import array
+                import math
+                with wave.open(audio_path, "rb") as wf:
+                    sr = wf.getframerate()
+                    ch = wf.getnchannels()
+                    sw = wf.getsampwidth()
+                    if sw == 2 and sr > 0:
+                        best_rms = -1.0
+                        step = 1.0
+                        pos = search_start
+                        while pos + td <= search_end:
+                            abs_s = clip_start + pos
+                            frame_idx = int(abs_s * sr)
+                            n_frames = int(td * sr)
+                            if frame_idx >= 0 and frame_idx + n_frames <= wf.getnframes():
+                                wf.setpos(frame_idx)
+                                raw = wf.readframes(n_frames)
+                                samples = array.array("h", raw)
+                                if samples:
+                                    # Amostragem rápida a cada 16 samples para velocidade
+                                    step_s = max(1, 16 * ch)
+                                    sq_sum = 0.0
+                                    cnt = 0
+                                    for i in range(0, len(samples), step_s):
+                                        v = float(samples[i])
+                                        sq_sum += v * v
+                                        cnt += 1
+                                    rms = math.sqrt(sq_sum / max(1, cnt))
+                                    if rms > best_rms:
+                                        best_rms = rms
+                                        best_rel = pos
+                            pos += step
+            except Exception:
+                pass
+
+        best_rel = max(0.0, min(best_rel, max(0.0, clip_duration - td)))
+        return round(best_rel, 3), round(min(clip_duration, best_rel + td), 3)
+
     def _build_opus_filtergraph(
         self,
         crop_mode: str,
@@ -474,7 +581,9 @@ class VideoEditor:
         shake_windows: Optional[list],
         source_fps: str,
         hook_banner_text: str = "",
-        hook_duration: float = 2.8,
+        hook_duration: float = 4.0,
+        hook_teaser_window: Optional[Tuple[float, float]] = None,
+        main_body_duration: Optional[float] = None,
         bgm_path: Optional[str] = None,
         bgm_volume: float = 0.18,
         bgm_ducking: bool = True,
@@ -498,6 +607,36 @@ class VideoEditor:
         base_chain = self._build_base_layout_filter(crop_mode, facecam_box, framing, input_label=v_src, output_label="[vbase]")
         parts.append(base_chain)
         cur_v = "[vbase]"
+
+        # Cold-Open Gancho de 4s (4s do clímax do vídeo + flash cut + clipe principal de 30-55s)
+        actual_hook_dur = 0.0
+        if hook_teaser_window:
+            ts, te = hook_teaser_window
+            actual_hook_dur = max(1.5, te - ts)
+            body_end = float(main_body_duration or max(8.0, eff_duration - actual_hook_dur))
+            flash_st = max(0.0, actual_hook_dur - 0.18)
+
+            parts.append(f"{cur_v}split=2[v_hsrc][v_msrc]")
+            parts.append(
+                f"[v_hsrc]trim=start={ts:.3f}:end={te:.3f},setpts=PTS-STARTPTS,"
+                f"scale=1156:2054:flags=lanczos,crop=1080:1920,setsar=1,"
+                f"fade=t=out:st={flash_st:.2f}:d=0.18:color=white[vhook]"
+            )
+            parts.append(
+                f"[v_msrc]trim=start=0:end={body_end:.3f},setpts=PTS-STARTPTS,setsar=1,"
+                f"fade=t=in:st=0:d=0.18:color=white[vmain]"
+            )
+            if has_audio:
+                a_src_ref = a_out if a_out.startswith("[") else "[0:a:0]"
+                parts.append(f"{a_src_ref}asplit=2[a_hsrc][a_msrc]")
+                parts.append(f"[a_hsrc]atrim=start={ts:.3f}:end={te:.3f},asetpts=PTS-STARTPTS[ahook]")
+                parts.append(f"[a_msrc]atrim=start=0:end={body_end:.3f},asetpts=PTS-STARTPTS[amain]")
+                parts.append("[vhook][ahook][vmain][amain]concat=n=2:v=1:a=1[vwithhook][awithhook]")
+                cur_v = "[vwithhook]"
+                a_out = "[awithhook]"
+            else:
+                parts.append("[vhook][vmain]concat=n=2:v=1:a=0[vwithhook]")
+                cur_v = "[vwithhook]"
 
         # Post-filters: Motion, Transition, AutoColor
         post: List[str] = []
@@ -565,22 +704,31 @@ class VideoEditor:
             )
             cur_v = "[vpbar]"
 
-        # Overlays de texto: Hook Visual (primeiros ~2.8s) + Headline + Legendas ASS + Marca d'água
+        # Overlays de texto: Gancho de alta presença nos 4s iniciais + Headline + Legendas ASS + Marca d'água
         text_ops: List[str] = []
         if hook_banner_text:
-            safe_hook = _escape_drawtext(hook_banner_text)[:54]
+            h_win = actual_hook_dur if actual_hook_dur > 0 else hook_duration
+            safe_hook = _escape_drawtext(hook_banner_text.upper())[:42]
             if safe_hook:
                 text_ops.append(
-                    f"drawtext=text='{safe_hook}':fontcolor=#FFE600:fontsize=50:box=1:boxcolor=black@0.86:boxborderw=22:x=(w-text_w)/2:y=115:enable='between(t,0,{hook_duration:.2f})'"
+                    f"drawtext=text='TEASER':fontcolor=white:fontsize=34:box=1:boxcolor=#e11d48@0.96:boxborderw=14:x=(w-text_w)/2:y=105:enable='between(t,0,{h_win:.2f})'"
+                )
+                text_ops.append(
+                    f"drawtext=text='{safe_hook}':fontcolor=#FFE600:fontsize=64:borderw=4:bordercolor=black:box=1:boxcolor=black@0.88:boxborderw=26:x=(w-text_w)/2:y=185:enable='between(t,0,{h_win:.2f})'"
                 )
 
         if headline_text:
             safe_hl = _escape_drawtext(headline_text)[:62]
             if safe_hl:
-                y_pos = 215 if hook_banner_text else 95
-                text_ops.append(
-                    f"drawtext=text='{safe_hl}':fontcolor=white:fontsize=46:box=1:boxcolor=black@0.72:boxborderw=18:x=(w-text_w)/2:y={y_pos}"
-                )
+                if hook_banner_text:
+                    h_win = actual_hook_dur if actual_hook_dur > 0 else hook_duration
+                    text_ops.append(
+                        f"drawtext=text='{safe_hl}':fontcolor=white:fontsize=48:box=1:boxcolor=black@0.76:boxborderw=18:x=(w-text_w)/2:y=115:enable='gte(t,{h_win:.2f})'"
+                    )
+                else:
+                    text_ops.append(
+                        f"drawtext=text='{safe_hl}':fontcolor=white:fontsize=48:box=1:boxcolor=black@0.76:boxborderw=18:x=(w-text_w)/2:y=115"
+                    )
 
         if ass_path and os.path.exists(ass_path):
             escaped_ass = _escape_ffmpeg_filter_path(ass_path)
