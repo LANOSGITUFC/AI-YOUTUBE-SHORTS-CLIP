@@ -166,7 +166,8 @@ def init_db():
                 )
                 db.add(source)
         
-        # Seed Default Destination Channel for scheduling
+        # Seed Default Destination Channel (apenas se não houver contas nem tokens OAuth em disco)
+        _auto_recover_tokens_from_disk(db)
         dest_exist = db.query(DestinationChannel).first()
         if not dest_exist:
             default_dest = DestinationChannel(
@@ -213,6 +214,83 @@ def init_db():
                 db.add(SystemSetting(key=k, value=v, description=desc))
                 
         db.commit()
+
+def _auto_recover_tokens_from_disk(db: Session) -> int:
+    """
+    Re-conecta automaticamente Google Drive e todas as contas YouTube cujos tokens OAuth
+    já estejam salvos em ./data/tokens/*.json (mesmo após apagar shorts_clipper.db).
+    """
+    tokens_dir = "./data/tokens"
+    if not os.path.isdir(tokens_dir):
+        return 0
+
+    # 1. Restaura Google Drive se gdrive_token.json existir
+    gdrive_token = os.path.join(tokens_dir, "gdrive_token.json")
+    if os.path.isfile(gdrive_token):
+        row = db.query(SystemSetting).filter(SystemSetting.key == "GDRIVE_TOKEN_PATH").first()
+        if row:
+            row.value = gdrive_token
+        else:
+            db.add(SystemSetting(key="GDRIVE_TOKEN_PATH", value=gdrive_token, description="Token OAuth Google Drive"))
+
+    # 2. Restaura contas YouTube de ./data/tokens/*.json
+    existing_paths = {
+        os.path.abspath(d.oauth_credentials_path)
+        for d in db.query(DestinationChannel).all()
+        if d.oauth_credentials_path
+    }
+    recovered = 0
+    for fn in sorted(os.listdir(tokens_dir)):
+        if not fn.endswith(".json") or fn == "gdrive_token.json":
+            continue
+        rel_path = os.path.join(tokens_dir, fn)
+        abs_path = os.path.abspath(rel_path)
+        if abs_path in existing_paths:
+            continue
+
+        ch_name = os.path.splitext(fn)[0].replace("token_", "").replace("_", " ").strip() or "Canal YouTube"
+        yt_channel_id = ""
+        try:
+            from google.oauth2.credentials import Credentials
+            from google.auth.transport.requests import Request
+            from googleapiclient.discovery import build
+
+            creds = Credentials.from_authorized_user_file(rel_path)
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                with open(rel_path, "w", encoding="utf-8") as f:
+                    f.write(creds.to_json())
+            yt = build("youtube", "v3", credentials=creds)
+            resp = yt.channels().list(part="snippet", mine=True).execute()
+            items = resp.get("items") or []
+            if items:
+                yt_channel_id = items[0].get("id") or ""
+                ch_name = items[0].get("snippet", {}).get("title") or ch_name
+        except Exception:
+            pass
+
+        db.add(DestinationChannel(
+            name=ch_name[:195],
+            youtube_channel_id=yt_channel_id,
+            oauth_credentials_path=rel_path,
+            daily_post_limit=4,
+            posting_times=json.dumps(["11:30", "15:00", "18:30", "21:00"]),
+            is_active=True,
+        ))
+        existing_paths.add(abs_path)
+        recovered += 1
+
+    if recovered > 0:
+        db.flush()
+        # Distribui pesos automaticamente (soma = 100%)
+        active = db.query(DestinationChannel).filter(DestinationChannel.is_active == True).order_by(DestinationChannel.id.asc()).all()
+        if active:
+            base_w = 100 // len(active)
+            rem = 100 - base_w * len(active)
+            for idx, d in enumerate(active):
+                d.weight = base_w + (1 if idx < rem else 0)
+    return recovered
+
 
 def get_db():
     db = SessionLocal()
