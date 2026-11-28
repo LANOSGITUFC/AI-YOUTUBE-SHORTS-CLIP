@@ -12,7 +12,10 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session, joinedload
 from app.database.models import DestinationChannel, ClipSegment, ScheduledPost, SystemSetting
 
-DEFAULT_SLOTS = ["11:30", "15:00", "18:30", "21:00"]
+DEFAULT_SLOTS = ["07:30", "01:30", "19:30", "13:30"]
+DEFAULT_START_TIME = "07:30"
+DEFAULT_INTERVAL_HOURS = 18.0
+DEFAULT_VARIANCE_MINUTES = 20
 
 PT_BR_WEEKDAYS = [
     "Segunda-feira",
@@ -34,15 +37,43 @@ def _has_valid_rendered_file(clip: Optional[ClipSegment]) -> bool:
     )
 
 
+def _deterministic_variance_minutes(channel_id: int, step_index: int, max_var: int) -> int:
+    """Variância orgânica determinística (+/- max_var min) para o 2º vídeo em diante (o 1º sempre inicia exato às 07:30)."""
+    if step_index <= 0 or max_var <= 0:
+        return 0
+    # Padrão balanceado sem depender de aleatoriedade volátil entre chamadas
+    offsets = [0, 12, -15, 18, -10, 15, -18, 8, -12, 20, -8, 10]
+    raw = offsets[(step_index + channel_id * 3) % len(offsets)]
+    return max(-max_var, min(max_var, raw))
+
+
 class PostScheduler:
     def __init__(self, db: Session):
         self.db = db
 
+    def _get_setting_str(self, key: str, default: str) -> str:
+        row = self.db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        return (row.value or "").strip() if (row and row.value) else default
+
     def is_auto_schedule_enabled(self) -> bool:
-        row = self.db.query(SystemSetting).filter(SystemSetting.key == "AUTO_SCHEDULE").first()
-        if not row or not row.value:
-            return True
-        return row.value.strip().lower() in ("true", "1", "yes", "sim")
+        val = self._get_setting_str("AUTO_SCHEDULE", "true").lower()
+        return val in ("true", "1", "yes", "sim")
+
+    def get_schedule_cadence(self) -> tuple[int, int, float, int]:
+        start_str = self._get_setting_str("SCHEDULE_START_TIME", DEFAULT_START_TIME)
+        try:
+            sh, sm = map(int, start_str.split(":"))
+        except Exception:
+            sh, sm = 7, 30
+        try:
+            interval_h = max(1.0, float(self._get_setting_str("SCHEDULE_INTERVAL_HOURS", str(DEFAULT_INTERVAL_HOURS))))
+        except Exception:
+            interval_h = DEFAULT_INTERVAL_HOURS
+        try:
+            var_m = max(0, min(45, int(self._get_setting_str("SCHEDULE_VARIANCE_MINUTES", str(DEFAULT_VARIANCE_MINUTES)))))
+        except Exception:
+            var_m = DEFAULT_VARIANCE_MINUTES
+        return sh, sm, interval_h, var_m
 
     def get_channel_slots(self, channel: DestinationChannel) -> List[str]:
         if not channel.posting_times:
@@ -53,44 +84,63 @@ class PostScheduler:
         except Exception:
             return DEFAULT_SLOTS
 
+    def _generate_cadence_slots(
+        self,
+        channel_id: int,
+        days_ahead: int = 14,
+        base_now: Optional[datetime.datetime] = None,
+    ) -> List[datetime.datetime]:
+        """
+        Gera a sequência de horários espaçados de 18h em 18h iniciando às 07:30,
+        com variância orgânica de minutos (+/- 20 min) entre os vídeos.
+        """
+        now = base_now or datetime.datetime.now()
+        sh, sm, interval_h, var_m = self.get_schedule_cadence()
+        anchor = datetime.datetime.combine(now.date(), datetime.time(sh, sm))
+        horizon = now + datetime.timedelta(days=max(1, days_ahead))
+
+        slots: List[datetime.datetime] = []
+        step = 0
+        while True:
+            base_dt = anchor + datetime.timedelta(hours=interval_h * step)
+            jitter = _deterministic_variance_minutes(channel_id, step, var_m)
+            cand_dt = base_dt + datetime.timedelta(minutes=jitter)
+            if cand_dt > horizon:
+                break
+            if cand_dt > now:
+                slots.append(cand_dt)
+            step += 1
+            if step > 200:
+                break
+        return slots
+
     def get_upcoming_empty_slots(
         self,
         channel_id: int,
-        days_ahead: int = 7,
+        days_ahead: int = 14,
     ) -> List[datetime.datetime]:
         channel = self.db.query(DestinationChannel).filter(DestinationChannel.id == channel_id).first()
         if not channel:
             return []
 
-        slots = self.get_channel_slots(channel)
-        now = datetime.datetime.now()
+        _, _, interval_h, _ = self.get_schedule_cadence()
+        min_gap = datetime.timedelta(hours=max(1.0, interval_h - 1.5))
+
+        existing_dts = [
+            p.scheduled_for
+            for p in self.db.query(ScheduledPost)
+            .filter(ScheduledPost.destination_channel_id == channel_id)
+            .filter(ScheduledPost.status.in_(["pending", "awaiting_oauth", "scheduled_on_youtube", "published"]))
+            .all()
+            if p.scheduled_for
+        ]
+
+        candidates = self._generate_cadence_slots(channel_id, days_ahead=days_ahead)
         empty_slots: List[datetime.datetime] = []
-
-        for d in range(days_ahead):
-            current_date = (now + datetime.timedelta(days=d)).date()
-            for s_str in slots:
-                try:
-                    hour, minute = map(int, s_str.split(":"))
-                except Exception:
-                    hour, minute = 12, 0
-
-                slot_dt = datetime.datetime.combine(current_date, datetime.time(hour, minute))
-                if slot_dt <= now:
-                    continue
-
-                start_window = slot_dt - datetime.timedelta(minutes=30)
-                end_window = slot_dt + datetime.timedelta(minutes=30)
-
-                existing = (
-                    self.db.query(ScheduledPost)
-                    .filter(ScheduledPost.destination_channel_id == channel_id)
-                    .filter(ScheduledPost.scheduled_for >= start_window)
-                    .filter(ScheduledPost.scheduled_for <= end_window)
-                    .filter(ScheduledPost.status.in_(["pending", "awaiting_oauth", "scheduled_on_youtube", "published"]))
-                    .first()
-                )
-                if not existing:
-                    empty_slots.append(slot_dt)
+        for cand_dt in candidates:
+            if any(abs(cand_dt - ex) < min_gap for ex in existing_dts):
+                continue
+            empty_slots.append(cand_dt)
 
         return empty_slots
 
@@ -251,57 +301,79 @@ class PostScheduler:
         if not channel:
             return {"error": "Canal não encontrado"}
 
-        slots = self.get_channel_slots(channel)
         now = datetime.datetime.now()
-        matrix = []
+        sh, sm, interval_h, var_m = self.get_schedule_cadence()
+        anchor = datetime.datetime.combine(now.date(), datetime.time(sh, sm))
+        end_horizon = datetime.datetime.combine((now + datetime.timedelta(days=days)).date(), datetime.time(23, 59))
 
+        # Gera todos os slots da cadência (iniciando em 07:30, +18h entre vídeos, com variância orgânica)
+        by_date: Dict[datetime.date, List[datetime.datetime]] = defaultdict(list)
+        step = 0
+        while True:
+            base_dt = anchor + datetime.timedelta(hours=interval_h * step)
+            jitter = _deterministic_variance_minutes(channel_id, step, var_m)
+            cand_dt = base_dt + datetime.timedelta(minutes=jitter)
+            if cand_dt > end_horizon:
+                break
+            by_date[cand_dt.date()].append(cand_dt)
+            step += 1
+            if step > 200:
+                break
+
+        matrix = []
         total_scheduled = 0
-        total_slots = days * len(slots)
+        total_slots = 0
 
         for d in range(days):
             day_date = (now + datetime.timedelta(days=d)).date()
             day_slots_data = []
+            used_post_ids = set()
 
-            for s_str in slots:
-                try:
-                    hour, minute = map(int, s_str.split(":"))
-                except Exception:
-                    hour, minute = 12, 0
+            day_start = datetime.datetime.combine(day_date, datetime.time(0, 0))
+            day_end = datetime.datetime.combine(day_date, datetime.time(23, 59, 59))
+            day_posts = (
+                self.db.query(ScheduledPost)
+                .filter(ScheduledPost.destination_channel_id == channel_id)
+                .filter(ScheduledPost.scheduled_for >= day_start)
+                .filter(ScheduledPost.scheduled_for <= day_end)
+                .filter(ScheduledPost.status != "cancelled")
+                .order_by(ScheduledPost.scheduled_for.asc())
+                .all()
+            )
 
-                slot_dt = datetime.datetime.combine(day_date, datetime.time(hour, minute))
-                start_w = slot_dt - datetime.timedelta(minutes=30)
-                end_w = slot_dt + datetime.timedelta(minutes=30)
+            for slot_dt in sorted(by_date.get(day_date, [])):
+                total_slots += 1
+                s_str = slot_dt.strftime("%H:%M")
+                matched_post = None
+                for p in day_posts:
+                    if p.id in used_post_ids:
+                        continue
+                    if abs((p.scheduled_for - slot_dt).total_seconds()) <= 5400:  # ±90 min
+                        matched_post = p
+                        used_post_ids.add(p.id)
+                        break
 
-                post = (
-                    self.db.query(ScheduledPost)
-                    .filter(ScheduledPost.destination_channel_id == channel_id)
-                    .filter(ScheduledPost.scheduled_for >= start_w)
-                    .filter(ScheduledPost.scheduled_for <= end_w)
-                    .filter(ScheduledPost.status != "cancelled")
-                    .first()
-                )
-
-                if post and post.clip:
+                if matched_post and matched_post.clip:
                     total_scheduled += 1
-                    has_mp4 = _has_valid_rendered_file(post.clip)
-                    has_thumb = bool(post.clip.thumbnail_path and os.path.exists(post.clip.thumbnail_path))
+                    has_mp4 = _has_valid_rendered_file(matched_post.clip)
+                    has_thumb = bool(matched_post.clip.thumbnail_path and os.path.exists(matched_post.clip.thumbnail_path))
                     slot_info = {
-                        "time": s_str,
+                        "time": matched_post.scheduled_for.strftime("%H:%M"),
                         "datetime": slot_dt.isoformat(),
                         "is_filled": True,
-                        "post_id": post.id,
-                        "status": post.status,
-                        "scheduled_for": post.scheduled_for.isoformat(),
-                        "is_simulated": bool(post.youtube_video_id and post.youtube_video_id.startswith("yt_sim_")),
-                        "youtube_url": post.youtube_url,
-                        "error_log": post.error_log,
+                        "post_id": matched_post.id,
+                        "status": matched_post.status,
+                        "scheduled_for": matched_post.scheduled_for.isoformat(),
+                        "is_simulated": bool(matched_post.youtube_video_id and matched_post.youtube_video_id.startswith("yt_sim_")),
+                        "youtube_url": matched_post.youtube_url,
+                        "error_log": matched_post.error_log,
                         "clip": {
-                            "id": post.clip.id,
-                            "title": post.clip.title,
-                            "score": post.clip.virality_score,
-                            "duration": round(float(post.clip.duration or 0), 1),
-                            "media_url": f"/media/clips/{os.path.basename(post.clip.clip_path)}" if has_mp4 else None,
-                            "thumbnail_url": f"/media/thumbnails/{os.path.basename(post.clip.thumbnail_path)}" if has_thumb else None,
+                            "id": matched_post.clip.id,
+                            "title": matched_post.clip.title,
+                            "score": matched_post.clip.virality_score,
+                            "duration": round(float(matched_post.clip.duration or 0), 1),
+                            "media_url": f"/media/clips/{os.path.basename(matched_post.clip.clip_path)}" if has_mp4 else None,
+                            "thumbnail_url": f"/media/thumbnails/{os.path.basename(matched_post.clip.thumbnail_path)}" if has_thumb else None,
                         },
                     }
                 else:
@@ -318,6 +390,35 @@ class PostScheduler:
 
                 day_slots_data.append(slot_info)
 
+            # Inclui posts extras movidos manualmente para este dia fora do slot padrão
+            for extra in day_posts:
+                if extra.id in used_post_ids or not extra.clip:
+                    continue
+                total_slots += 1
+                total_scheduled += 1
+                has_mp4 = _has_valid_rendered_file(extra.clip)
+                has_thumb = bool(extra.clip.thumbnail_path and os.path.exists(extra.clip.thumbnail_path))
+                day_slots_data.append({
+                    "time": extra.scheduled_for.strftime("%H:%M"),
+                    "datetime": extra.scheduled_for.isoformat(),
+                    "is_filled": True,
+                    "post_id": extra.id,
+                    "status": extra.status,
+                    "scheduled_for": extra.scheduled_for.isoformat(),
+                    "is_simulated": bool(extra.youtube_video_id and extra.youtube_video_id.startswith("yt_sim_")),
+                    "youtube_url": extra.youtube_url,
+                    "error_log": extra.error_log,
+                    "clip": {
+                        "id": extra.clip.id,
+                        "title": extra.clip.title,
+                        "score": extra.clip.virality_score,
+                        "duration": round(float(extra.clip.duration or 0), 1),
+                        "media_url": f"/media/clips/{os.path.basename(extra.clip.clip_path)}" if has_mp4 else None,
+                        "thumbnail_url": f"/media/thumbnails/{os.path.basename(extra.clip.thumbnail_path)}" if has_thumb else None,
+                    },
+                })
+
+            day_slots_data.sort(key=lambda s: s["time"])
             matrix.append({
                 "date": day_date.strftime("%d/%m/%Y"),
                 "day_name": PT_BR_WEEKDAYS[day_date.weekday()],
@@ -328,8 +429,11 @@ class PostScheduler:
         return {
             "channel_id": channel_id,
             "channel_name": channel.name,
+            "start_time": f"{sh:02d}:{sm:02d}",
+            "interval_hours": interval_h,
+            "variance_minutes": var_m,
             "total_slots": total_slots,
             "filled_slots": total_scheduled,
-            "empty_slots": total_slots - total_scheduled,
+            "empty_slots": max(0, total_slots - total_scheduled),
             "matrix": matrix,
         }

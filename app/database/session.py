@@ -189,6 +189,9 @@ def init_db():
             ("MAX_CLIP_DURATION", "58", "Duração máxima do Short em segundos (máximo 60)"),
             ("MIN_CLIP_DURATION", "20", "Duração mínima do Short em segundos"),
             ("AUTO_SCHEDULE", "true", "Agendar automaticamente clipes recém-gerados nos próximos slots vagos"),
+            ("SCHEDULE_START_TIME", "07:30", "Horário inicial da grade de postagens (HH:MM)"),
+            ("SCHEDULE_INTERVAL_HOURS", "18", "Espaçamento em horas entre um vídeo e outro por canal"),
+            ("SCHEDULE_VARIANCE_MINUTES", "20", "Variância orgânica em minutos (+/-) aplicada aos horários"),
             ("TIMEZONE", "America/Sao_Paulo", "Fuso horário IANA usado para converter publishAt do YouTube"),
             ("YT_COOKIES_BROWSER", "", "Navegador opcional para cookies do yt-dlp (chrome, firefox, brave)"),
             ("STUDIO_PRESET_JSON", json.dumps({

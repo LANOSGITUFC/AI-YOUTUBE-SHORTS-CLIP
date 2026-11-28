@@ -4,6 +4,7 @@ Executa as etapas da esteira com telemetria em tempo real, proteção contra con
 e suporte a processamento sob demanda de vídeos específicos.
 """
 
+import os
 import time
 import datetime
 import logging
@@ -19,7 +20,7 @@ from app.services.analyzer import HighlightAnalyzer
 from app.services.editor import VideoEditor
 from app.services.scheduler import PostScheduler
 from app.services.uploader import YouTubeUploader
-from app.database.models import SourceVideo, ClipSegment, ScheduledPost
+from app.database.models import SourceVideo, ClipSegment, ScheduledPost, SystemSetting
 from app.services.priority import get_priority_weights, priority_key
 
 logging.basicConfig(level=logging.INFO)
