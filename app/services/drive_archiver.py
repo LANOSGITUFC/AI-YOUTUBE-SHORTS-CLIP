@@ -47,6 +47,7 @@ class DriveArchiver:
         self.db.commit()
 
     def get_storage_status(self) -> Dict[str, Any]:
+        from app.services.auth_youtube import get_client_secrets_path
         downloads_dir = "./data/downloads"
         clips_dir = "./data/clips"
         raw_bytes = 0
@@ -68,6 +69,17 @@ class DriveArchiver:
                     clips_files += 1
 
         index = self._load_index()
+        token_path = self._get_setting("GDRIVE_TOKEN_PATH", "./data/tokens/gdrive_token.json")
+        archivable = []
+        for v in self.db.query(SourceVideo).filter(SourceVideo.status.in_(["processed", "transcribed", "downloaded"])).order_by(SourceVideo.created_at.desc()).limit(30).all():
+            if v.video_path and os.path.isfile(v.video_path):
+                archivable.append({
+                    "video_id": v.id,
+                    "title": v.title,
+                    "status": v.status,
+                    "size_mb": round(os.path.getsize(v.video_path) / (1024 * 1024), 1),
+                })
+
         return {
             "raw_files_count": raw_files,
             "raw_size_mb": round(raw_bytes / (1024 * 1024), 1),
@@ -75,9 +87,12 @@ class DriveArchiver:
             "clips_size_mb": round(clips_bytes / (1024 * 1024), 1),
             "archived_count": len(index),
             "archived_videos": index,
+            "archivable_videos": archivable,
             "drive_folder_id": self._get_setting("GDRIVE_FOLDER_ID"),
             "rclone_remote": self._get_setting("GDRIVE_RCLONE_REMOTE"),
             "rclone_available": bool(shutil.which("rclone")),
+            "gdrive_oauth_connected": os.path.exists(token_path),
+            "client_secrets_ready": bool(get_client_secrets_path()),
         }
 
     def archive_video(self, video_id: str, delete_local_after: bool = True) -> Dict[str, Any]:

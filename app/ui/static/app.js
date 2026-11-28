@@ -2435,15 +2435,29 @@ async function loadAnalyticsAndStorageView() {
     const drvEl = document.getElementById('driveStorageBox');
     if (drvEl) {
       const archivedEntries = Object.entries(st.archived_videos || {});
+      const archivable = st.archivable_videos || [];
       drvEl.innerHTML = `
+        <div class="exp-metrics-row" style="margin-bottom:8px;">
+          <span>Status Google Drive: <span class="badge ${st.gdrive_oauth_connected ? 'badge-ok' : ''}">${st.gdrive_oauth_connected ? 'Conectado (OAuth)' : 'Desconectado'}</span></span>
+          <a href="/api/auth/gdrive/login" class="btn btn-primary btn-sm">${st.gdrive_oauth_connected ? 'Reconectar Drive' : 'Conectar Google Drive (OAuth)'}</a>
+        </div>
+        <div style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
+          <input id="gdriveFolderInput" type="text" class="input" style="flex:1; min-width:180px;" placeholder="Cole o link ou ID da pasta no Google Drive" value="${esc(st.drive_folder_id || '')}">
+          <button class="btn btn-secondary btn-sm" onclick="saveDriveConfig()">Salvar pasta</button>
+        </div>
         <div class="exp-metrics-row"><span>Lives em disco local: <strong>${st.raw_files_count || 0}</strong> (${st.raw_size_mb || 0} MB)</span><span>Clipes 9:16: <strong>${st.clips_size_mb || 0} MB</strong></span></div>
-        <div class="exp-metrics-row"><span>rclone disponível: <strong>${st.rclone_available ? 'Sim' : 'Não'}</strong></span><span>Arquivadas no Drive: <strong>${archivedEntries.length}</strong></span></div>
-        ${archivedEntries.map(([vid, info]) => `
+        ${archivable.length ? `<div style="margin-top:8px; font-size:11.5px; font-weight:600; color:var(--text-muted);">Lives locais prontas para arquivar no Drive:</div>` + archivable.slice(0, 8).map((v) => `
           <div class="exp-metrics-row">
-            <span>☁️ ${esc(info.title || vid)} (${info.size_mb || 0} MB)</span>
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:66%;" title="${esc(v.title)}">💾 ${esc(v.title)} (${v.size_mb} MB)</span>
+            <button class="btn btn-secondary btn-sm" id="btnArch-${esc(v.video_id)}" onclick="archiveVideoToDrive('${esc(v.video_id)}')">Arquivar no Drive</button>
+          </div>
+        `).join('') : ''}
+        ${archivedEntries.length ? `<div style="margin-top:8px; font-size:11.5px; font-weight:600; color:var(--text-muted);">Arquivadas no Google Drive (${archivedEntries.length}):</div>` + archivedEntries.map(([vid, info]) => `
+          <div class="exp-metrics-row">
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:60%;">☁️ ${info.drive_url ? `<a href="${esc(info.drive_url)}" target="_blank" rel="noopener" style="color:var(--text-main);">${esc(info.title || vid)}</a>` : esc(info.title || vid)} (${info.size_mb || 0} MB)</span>
             <button class="btn btn-secondary btn-sm" onclick="restoreVideoFromDrive('${esc(vid)}')">Restaurar do Drive</button>
           </div>
-        `).join('')}
+        `).join('') : ''}
       `;
     }
 
@@ -2640,5 +2654,49 @@ async function syncAnalyticsYoutube() {
     showToast('Erro de rede ao sincronizar YouTube.', 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Sincronizar YouTube agora'; }
+  }
+}
+
+async function saveDriveConfig() {
+  const folder = document.getElementById('gdriveFolderInput')?.value.trim() || '';
+  try {
+    const res = await fetch('/api/storage/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ drive_folder_id: folder }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao salvar pasta do Drive.', 'error');
+      return;
+    }
+    showToast(`Pasta do Google Drive salva (${data.drive_folder_id || 'raiz do Drive'})!`, 'success');
+    loadAnalyticsAndStorageView();
+  } catch (e) {
+    showToast('Erro de rede ao salvar pasta do Drive.', 'error');
+  }
+}
+
+async function archiveVideoToDrive(videoId) {
+  const btn = document.getElementById(`btnArch-${videoId}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+  showToast('Enviando live para o Google Drive (só libera o disco após confirmar)...', 'info');
+  try {
+    const res = await fetch(`/api/videos/${encodeURIComponent(videoId)}/archive-drive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delete_local_after: true }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao arquivar no Google Drive.', 'error');
+      return;
+    }
+    showToast(`Live arquivada no Drive! ${data.freed_mb || 0} MB liberados no disco local.`, 'success');
+    loadAnalyticsAndStorageView();
+  } catch (e) {
+    showToast('Erro de rede ao arquivar live no Drive.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Arquivar no Drive'; }
   }
 }

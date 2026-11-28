@@ -1623,8 +1623,83 @@ def youtube_oauth_login(channel_name: str = "Canal Novo", db: Session = Depends(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/api/auth/gdrive/login")
+def gdrive_oauth_login():
+    """Conecta Google Drive via OAuth reutilizando o mesmo client_secret.json e Redirect URI do YouTube."""
+    from google_auth_oauthlib.flow import Flow
+    secrets_file = get_client_secrets_path()
+    if not secrets_file:
+        raise HTTPException(
+            status_code=400,
+            detail="Arquivo client_secret.json não encontrado em data/. Coloque o mesmo arquivo usado para conectar o YouTube.",
+        )
+    flow = Flow.from_client_secrets_file(
+        secrets_file,
+        scopes=["https://www.googleapis.com/auth/drive.file"],
+        redirect_uri="http://localhost:8000/api/auth/youtube/callback",
+    )
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+        state="gdrive_archiver",
+    )
+    return RedirectResponse(auth_url)
+
+
+@app.post("/api/storage/config")
+def save_storage_drive_config(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    raw_folder = str(payload.get("drive_folder_id") or "").strip()
+    # Aceita tanto o ID puro quanto a URL completa https://drive.google.com/drive/folders/<ID>
+    m = re.search(r"/folders/([A-Za-z0-9_-]+)", raw_folder)
+    folder_id = m.group(1) if m else raw_folder
+    rclone_remote = str(payload.get("rclone_remote") or "").strip()
+    _upsert_setting(db, "GDRIVE_FOLDER_ID", folder_id, "ID da pasta do Google Drive para arquivar lives")
+    _upsert_setting(db, "GDRIVE_RCLONE_REMOTE", rclone_remote, "Remoto rclone opcional (ex: gdrive:Lives)")
+    db.commit()
+    return {"status": "saved", "drive_folder_id": folder_id, "rclone_remote": rclone_remote}
+
+
 @app.get("/api/auth/youtube/callback")
 def youtube_oauth_callback(code: str, state: Optional[str] = "Canal Novo", db: Session = Depends(get_db)):
+    if state == "gdrive_archiver":
+        try:
+            from google_auth_oauthlib.flow import Flow
+            secrets_file = get_client_secrets_path()
+            if not secrets_file:
+                raise FileNotFoundError("client_secret.json não encontrado.")
+            flow = Flow.from_client_secrets_file(
+                secrets_file,
+                scopes=["https://www.googleapis.com/auth/drive.file"],
+                redirect_uri="http://localhost:8000/api/auth/youtube/callback",
+            )
+            flow.fetch_token(code=code)
+            os.makedirs("./data/tokens", exist_ok=True)
+            token_path = "./data/tokens/gdrive_token.json"
+            with open(token_path, "w", encoding="utf-8") as f:
+                f.write(flow.credentials.to_json())
+            _upsert_setting(db, "GDRIVE_TOKEN_PATH", token_path, "Token OAuth Google Drive")
+            db.commit()
+            return HTMLResponse("""
+            <html>
+            <body style="background:#0b0c0e; color:#f4f4f5; font-family:system-ui,sans-serif; text-align:center; padding:64px;">
+                <h1 style="color:#30a46c; font-size:22px;">Google Drive conectado com sucesso!</h1>
+                <p style="color:#a1a1aa;">Agora você pode arquivar lives processadas no Drive e restaurá-las quando quiser fazer novos cortes ou compilados.</p>
+                <a href="/" style="display:inline-block; margin-top:24px; padding:10px 20px; background:#e5484d; color:#fff; text-decoration:none; border-radius:6px; font-weight:600; font-size:14px;">Voltar ao Estúdio</a>
+            </body>
+            </html>
+            """)
+        except Exception as e:
+            return HTMLResponse(f"""
+            <html>
+            <body style="background:#0b0c0e; color:#f4f4f5; font-family:system-ui,sans-serif; text-align:center; padding:64px;">
+                <h1 style="color:#e5484d; font-size:22px;">Erro ao conectar Google Drive</h1>
+                <p style="color:#a1a1aa; max-width:560px; margin:16px auto;">{str(e)}</p>
+                <a href="/" style="display:inline-block; margin-top:24px; padding:10px 20px; background:#27272a; color:#fff; text-decoration:none; border-radius:6px; font-size:14px;">Voltar ao Estúdio</a>
+            </body>
+            </html>
+            """)
+
     mgr = YouTubeAuthManager(db)
     try:
         res = mgr.handle_auth_callback(code=code, channel_name=state or "Canal Novo", state=state)
