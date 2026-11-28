@@ -801,21 +801,30 @@ async function loadCalendar() {
         </div>
         <div class="cal-slots">
           ${day.slots.map((s) => {
+            const isExternal = Boolean(s.is_external || (s.is_filled && !s.post_id));
             const stLabel = s.is_simulated ? 'SIMULADO'
+              : isExternal ? 'YT EXTERNO'
               : s.status === 'scheduled_on_youtube' ? 'NO YOUTUBE'
               : s.status === 'awaiting_oauth' ? 'SEM OAUTH'
               : s.status === 'pending' ? 'AGENDADO'
               : s.status === 'failed' ? 'ERRO'
               : 'VAGO';
-            const movable = s.is_filled && (EDITABLE_POST_STATUSES.includes(s.status) || s.is_simulated);
+            const movable = s.is_filled && !isExternal && (EDITABLE_POST_STATUSES.includes(s.status) || s.is_simulated);
             const stCls = s.status === 'scheduled_on_youtube' ? 'badge-ok'
               : s.status === 'awaiting_oauth' ? 'badge-warn'
               : s.status === 'failed' ? 'badge-err'
               : s.is_filled ? 'badge-info' : '';
+            const safeYtUrl = s.youtube_url ? esc(s.youtube_url) : '';
+            const clickAttr = !s.is_filled ? ''
+              : isExternal
+                ? (safeYtUrl
+                    ? `onclick="window.open('${safeYtUrl}', '_blank', 'noopener')" title="Vídeo agendado diretamente no YouTube — clique para abrir"`
+                    : `onclick="showToast('Vídeo agendado diretamente no YouTube Studio.', 'info')" title="Vídeo agendado diretamente no YouTube"`)
+                : `data-post-id="${Number(s.post_id)}" onclick="openEditPostModal(${Number(s.post_id)})" title="Clique para editar${movable ? ', arraste para mover' : ''}"`;
 
             return `
               <div class="cal-slot ${s.is_filled ? 'filled' : ''} ${movable ? 'draggable' : ''}" data-slot-dt="${esc(s.datetime)}"
-                   ${s.is_filled ? `data-post-id="${Number(s.post_id)}" onclick="openEditPostModal(${Number(s.post_id)})" title="Clique para editar${movable ? ', arraste para mover' : ''}"` : ''}
+                   ${clickAttr}
                    ${movable ? 'data-draggable="true"' : ''}>
                 <div class="cal-slot-top">
                   <span>${esc(s.is_filled && s.scheduled_for ? s.scheduled_for.slice(11, 16) : s.time)}</span>
@@ -824,8 +833,11 @@ async function loadCalendar() {
                 ${s.is_filled && s.clip ? `
                   <div class="cal-slot-title" title="${esc(s.clip.title)}">${esc(s.clip.title)}</div>
                   <div class="cal-slot-foot">
-                    <span>${esc(s.clip.duration)}s · S${esc(s.clip.score)}</span>
-                    <button class="btn btn-ghost btn-sm" style="height:20px; padding:0 5px; font-size:10.5px;" onclick="event.stopPropagation(); removeScheduledPost(${Number(s.post_id)})">Remover</button>
+                    ${isExternal
+                      ? `<span>YouTube Studio</span>${safeYtUrl ? `<a class="btn btn-ghost btn-sm" style="height:20px; padding:0 5px; font-size:10.5px; text-decoration:none;" href="${safeYtUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Abrir ↗</a>` : ''}`
+                      : `<span>${esc(s.clip.duration)}s · S${esc(s.clip.score)}</span>
+                         <button class="btn btn-ghost btn-sm" style="height:20px; padding:0 5px; font-size:10.5px;" onclick="event.stopPropagation(); removeScheduledPost(${Number(s.post_id)})">Remover</button>`
+                    }
                   </div>
                 ` : '<div style="font-size:11px; color:var(--text-muted);">Horário disponível</div>'}
               </div>
@@ -1727,6 +1739,10 @@ async function moveScheduledPost(postId, body) {
 
 // ---- Editor de agendamento (clique no horário) ----
 async function openEditPostModal(postId) {
+  if (!postId || Number(postId) <= 0) {
+    showToast('Vídeo agendado diretamente no YouTube Studio.', 'info');
+    return;
+  }
   try {
     const res = await fetch(`/api/scheduled-posts/${postId}`);
     const p = await res.json();
