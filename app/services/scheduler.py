@@ -29,12 +29,11 @@ PT_BR_WEEKDAYS = [
 
 
 def _has_valid_rendered_file(clip: Optional[ClipSegment]) -> bool:
-    return bool(
-        clip
-        and clip.clip_path
-        and os.path.exists(clip.clip_path)
-        and os.path.getsize(clip.clip_path) > 4096
-    )
+    """MP4 existe e passou no ffprobe + decodificação (resultado em cache por arquivo)."""
+    from app.services.render_guard import validate_mp4
+    if not clip or not clip.clip_path:
+        return False
+    return validate_mp4(clip.clip_path, deep=True)
 
 
 def _deterministic_variance_minutes(channel_id: int, step_index: int, max_var: int) -> int:
@@ -224,7 +223,17 @@ class PostScheduler:
             .order_by(ClipSegment.virality_score.desc())
             .all()
         )
-        unassigned_clips = [c for c in unassigned_clips if _has_valid_rendered_file(c)]
+        valid_clips = []
+        for c in unassigned_clips:
+            if _has_valid_rendered_file(c):
+                valid_clips.append(c)
+            else:
+                # MP4 corrompido/ausente (ex: render antigo que colidiu): volta para a fila do worker
+                # renderizar de novo. Se falhar outra vez, o editor marca 'render_failed' e para.
+                c.status = "analyzed"
+        if len(valid_clips) != len(unassigned_clips):
+            self.db.commit()
+        unassigned_clips = valid_clips
         if not unassigned_clips:
             return 0
 

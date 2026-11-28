@@ -18,6 +18,7 @@ from app.services.downloader import VideoDownloader
 from app.services.transcriber import WhisperTranscriber
 from app.services.analyzer import HighlightAnalyzer
 from app.services.editor import VideoEditor
+from app.services.render_guard import RenderBusyError
 from app.services.scheduler import PostScheduler
 from app.services.uploader import YouTubeUploader
 from app.database.models import SourceVideo, ClipSegment, ScheduledPost, SystemSetting
@@ -103,8 +104,11 @@ class PipelineWorker:
                     top_clip = max(clips, key=lambda c: c.virality_score or 0)
                     self._state["current_clip_id"] = top_clip.id
                     self._log("info", f"Renderizando 9:16 do corte #{top_clip.id}: {top_clip.title[:50]}", stage="rendering", progress=88)
-                    editor.render_clip(top_clip.id)
-                    rendered_ids.append(top_clip.id)
+                    try:
+                        editor.render_clip(top_clip.id, wait=False)
+                        rendered_ids.append(top_clip.id)
+                    except RenderBusyError:
+                        self._log("info", f"Corte #{top_clip.id} já está renderizando por outro pedido; pulando.", stage="rendering")
                     scheduler.auto_schedule_all_rendered()
 
                 self._log("success", f"Processamento concluído para {video.title[:55]}", stage="idle", progress=100)
@@ -270,9 +274,11 @@ class PipelineWorker:
                     self._state["current_clip_id"] = pending_clip.id
                     try:
                         self._log("info", f"Renderizando 9:16 clipe #{pending_clip.id}: {pending_clip.title[:50]}", stage="rendering", progress=84)
-                        editor.render_clip(pending_clip.id)
+                        editor.render_clip(pending_clip.id, wait=False)
                         results["clips_rendered"] += 1
                         self._log("success", f"Clipe #{pending_clip.id} renderizado em 1080x1920!", stage="rendering", progress=92)
+                    except RenderBusyError:
+                        self._log("info", f"Clipe #{pending_clip.id} já está renderizando (clique manual); o worker pula esta volta.", stage="rendering")
                     except Exception as e:
                         self._log("error", f"Erro ao renderizar clipe #{pending_clip.id}: {e}")
                         logger.debug(traceback.format_exc())

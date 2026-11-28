@@ -351,9 +351,11 @@ function renderClipsGrid() {
   }
 
   container.innerHTML = filtered.map((c) => {
-    const statusBadge = c.is_ready
-      ? `<span class="badge badge-ok">${esc(c.status)}</span>`
-      : `<span class="badge badge-warn">${esc(c.status)}</span>`;
+    const statusBadge = c.status === 'render_failed'
+      ? `<span class="badge badge-err" title="O MP4 saiu corrompido ou o FFmpeg falhou. Clique em Renderizar para tentar de novo.">falhou no render</span>`
+      : c.is_ready
+        ? `<span class="badge badge-ok">${esc(c.status)}</span>`
+        : `<span class="badge badge-warn">${esc(c.status)}</span>`;
 
     const mediaBlock = c.media_url
       ? `<div class="clip-media has-video">

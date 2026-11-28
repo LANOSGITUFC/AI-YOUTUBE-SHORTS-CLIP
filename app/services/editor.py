@@ -16,7 +16,6 @@ import re
 import json
 import uuid
 import logging
-import threading
 import subprocess
 from typing import Dict, Any, Optional, List, Tuple
 from sqlalchemy.orm import Session
@@ -25,25 +24,12 @@ from app.services.subtitles import SubtitleEngine, DEFAULT_SUBTITLE_STYLE
 from app.services.facecam_detector import FacecamDetector
 from app.services.layout_engine import normalize_layout, build_custom_layout_filter, caption_style_overrides
 from app.services.effects import VideoEffectsEngine
+from app.services.render_guard import clip_render_lock, validate_mp4, remember_valid, RenderBusyError  # noqa: F401
 
 CLIPS_DIR = "./data/clips"
 THUMBNAILS_DIR = "./data/thumbnails"
 
 logger = logging.getLogger("VideoEditor")
-
-_CLIP_RENDER_LOCKS_GUARD = threading.Lock()
-_CLIP_RENDER_LOCKS: Dict[int, threading.Lock] = {}
-
-
-def get_clip_render_lock(clip_id: int) -> threading.Lock:
-    """Retorna um lock exclusivo por clipe para impedir dois FFmpegs gravando o mesmo MP4."""
-    with _CLIP_RENDER_LOCKS_GUARD:
-        lock = _CLIP_RENDER_LOCKS.get(clip_id)
-        if lock is None:
-            lock = threading.Lock()
-            _CLIP_RENDER_LOCKS[clip_id] = lock
-        return lock
-
 
 def _escape_ffmpeg_filter_path(path: str) -> str:
     abs_path = os.path.abspath(path).replace("\\", "/")
@@ -187,14 +173,39 @@ class VideoEditor:
         enable_vfx: Optional[bool] = None,
         shake_windows: Optional[list] = None,
         style_override: Optional[Dict[str, Any]] = None,
+        wait: bool = True,
     ) -> Dict[str, Any]:
-        with get_clip_render_lock(clip_id):
-            return self._render_clip_locked(
-                clip_id=clip_id,
-                enable_vfx=enable_vfx,
-                shake_windows=shake_windows,
-                style_override=style_override,
-            )
+        """
+        Renderiza o clipe com trava exclusiva: nunca dois FFmpegs gravando o mesmo MP4.
+        wait=True (clique manual / "Salvar e renderizar"): espera o render em andamento e renderiza
+        de novo com a configuração mais recente. wait=False (worker 24/7): levanta RenderBusyError
+        se o clipe já está renderizando, para o worker seguir para outro.
+        """
+        with clip_render_lock(clip_id, wait=wait):
+            try:
+                return self._render_clip_locked(
+                    clip_id=clip_id,
+                    enable_vfx=enable_vfx,
+                    shake_windows=shake_windows,
+                    style_override=style_override,
+                )
+            except Exception:
+                self._mark_render_failed(clip_id)
+                raise
+
+    def _mark_render_failed(self, clip_id: int) -> None:
+        """Se o render falhou e não sobrou um MP4 bom em disco, o clipe vira 'render_failed' (não vai pra agenda)."""
+        try:
+            self.db.rollback()
+            clip = self.db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
+            if not clip:
+                return
+            if clip.status in ("analyzed", "rendered") and not validate_mp4(clip.clip_path):
+                clip.status = "render_failed"
+                self.db.commit()
+                logger.warning("Clipe #%s marcado como render_failed (sem MP4 válido em disco).", clip_id)
+        except Exception as exc:
+            logger.warning("Não consegui marcar clipe #%s como falho: %s", clip_id, exc)
 
     def _render_clip_locked(
         self,
@@ -509,7 +520,7 @@ class VideoEditor:
                 res = subprocess.run(fb2, capture_output=True, text=True, timeout=600)
 
             if not self._is_valid_mp4(tmp_clip_path):
-                err_tail = (res.stderr or "MP4 inválido ou corrompido (reprovado no ffprobe)")[-500:]
+                err_tail = (res.stderr or "MP4 inválido ou corrompido (reprovado no ffprobe/decodificação)")[-500:]
                 raise RuntimeError(f"Falha ao renderizar clipe #{clip_id}: {err_tail}")
 
             # 6. Thumbnail vertical (gerado do MP4 validado antes da troca atômica)
@@ -521,6 +532,7 @@ class VideoEditor:
             )
 
             os.replace(tmp_clip_path, clip_output_path)
+            remember_valid(clip_output_path)
             if os.path.exists(tmp_thumb_path) and os.path.getsize(tmp_thumb_path) > 0:
                 os.replace(tmp_thumb_path, thumbnail_output_path)
         finally:
@@ -887,43 +899,8 @@ class VideoEditor:
 
     @staticmethod
     def _is_valid_mp4(path: str) -> bool:
-        if not path or not os.path.isfile(path) or os.path.getsize(path) <= 4096:
-            return False
-        try:
-            probe = subprocess.run(
-                [
-                    "ffprobe", "-v", "error",
-                    "-select_streams", "v:0",
-                    "-show_entries", "stream=codec_name,width,height:format=duration",
-                    "-of", "json",
-                    path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            if probe.returncode != 0:
-                logger.warning("ffprobe rejeitou MP4 %s (rc=%s): %s", path, probe.returncode, (probe.stderr or "").strip()[:300])
-                return False
-            stderr_low = (probe.stderr or "").lower()
-            if any(err in stderr_low for err in ("invalid nal", "moov atom not found", "invalid data", "corrupt", "error")):
-                logger.warning("ffprobe detectou corrupção em %s: %s", path, (probe.stderr or "").strip()[:300])
-                return False
-            data = json.loads(probe.stdout or "{}")
-            streams = data.get("streams") or []
-            if not streams:
-                return False
-            v0 = streams[0]
-            width = int(v0.get("width") or 0)
-            height = int(v0.get("height") or 0)
-            duration = float((data.get("format") or {}).get("duration") or 0.0)
-            return width > 0 and height > 0 and duration > 0.5
-        except FileNotFoundError:
-            # Ambiente sem ffprobe instalado: cai no fallback de tamanho mínimo
-            return True
-        except Exception as exc:
-            logger.warning("Falha ao validar MP4 %s com ffprobe: %s", path, exc)
-            return False
+        """ffprobe no cabeçalho + decodificação completa (pega 'Invalid NAL unit size' e afins)."""
+        return validate_mp4(path, deep=True)
 
     @staticmethod
     def _has_audio_stream(video_path: str) -> bool:

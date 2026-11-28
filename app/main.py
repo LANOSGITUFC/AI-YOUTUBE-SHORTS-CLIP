@@ -33,6 +33,7 @@ from app.services.scheduler import PostScheduler
 from app.services.experiments import ChannelExperimentEngine, get_experiment_catalog
 from app.services.priority import ranked_channels
 from app.services.pipeline_worker import PipelineWorker
+from app.services.render_guard import RenderBusyError
 from app.services.auth_youtube import YouTubeAuthManager, get_client_secrets_path
 
 BOOT_ID = str(uuid.uuid4())
@@ -1093,6 +1094,8 @@ def render_clip_endpoint(
     try:
         res = editor.render_clip(clip_id, enable_vfx=enable_vfx)
         return res
+    except RenderBusyError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
