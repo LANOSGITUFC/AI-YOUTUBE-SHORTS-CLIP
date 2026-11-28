@@ -220,6 +220,14 @@ def _composite_score(views: int, likes: int, comments: int, retention: float) ->
     return round(float(views or 0) + float(likes or 0) * 12.0 + float(comments or 0) * 25.0 + float(retention or 0.0) * 15.0, 2)
 
 
+def _next_business_day(ref_date: datetime.date) -> datetime.date:
+    """Retorna o próximo dia útil (segunda a sexta) após ref_date."""
+    candidate = ref_date + datetime.timedelta(days=1)
+    while candidate.weekday() >= 5:  # 5=Sábado, 6=Domingo -> pula para Segunda
+        candidate += datetime.timedelta(days=1)
+    return candidate
+
+
 class ChannelExperimentEngine:
     def __init__(self, db: Session):
         self.db = db
@@ -234,34 +242,31 @@ class ChannelExperimentEngine:
         seed_offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """
-        Gera uma matriz balanceada (estilo quadrado latino) para N dias x M posts/dia.
-        Cada dia testa um perfil de horário diferente e rotaciona ortogonalmente todos os
-        estilos de edição, SEO, cena e duração para evitar viés.
+        Gera uma matriz balanceada (estilo quadrado latino) para N dias x M posts/dia,
+        SEMPRE iniciando no próximo dia útil (segunda a sexta) a partir das 07:30.
         """
         days = max(1, min(14, int(days or 7)))
         posts_per_day = max(1, min(6, int(posts_per_day or 4)))
         base_now = start_dt or datetime.datetime.now()
+        first_day = _next_business_day(base_now.date())
 
         slots: List[Dict[str, Any]] = []
         slot_seq = 0
 
         for d in range(days):
-            day_date = (base_now + datetime.timedelta(days=d)).date()
+            day_date = first_day + datetime.timedelta(days=d)
             sched = DAILY_TIME_SCHEDULES[(d + seed_offset) % len(DAILY_TIME_SCHEDULES)]
             day_times = sorted(sched["times"][:posts_per_day])
+            # Garante que o 1º slot do Dia 1 comece às 07:30
+            if d == 0 and day_times:
+                day_times[0] = "07:30"
 
             for s_idx, t_str in enumerate(day_times):
                 try:
                     hh, mm = map(int, t_str.split(":"))
                 except Exception:
-                    hh, mm = 12, 0
+                    hh, mm = 7, 30
                 slot_dt = datetime.datetime.combine(day_date, datetime.time(hh, mm))
-                # Se o horário de hoje já passou, empurra +7 dias ou mantém no dia seguinte se d==0
-                if d == 0 and slot_dt <= base_now:
-                    slot_dt = datetime.datetime.combine(
-                        (base_now + datetime.timedelta(days=days)).date(),
-                        datetime.time(hh, mm),
-                    )
 
                 bucket_id, bucket_label = classify_time_bucket(t_str)
                 edit_v = EDIT_STYLE_VARIANTS[(slot_seq + seed_offset) % len(EDIT_STYLE_VARIANTS)]
