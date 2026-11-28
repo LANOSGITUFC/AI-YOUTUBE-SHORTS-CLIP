@@ -36,6 +36,7 @@ from app.services.scheduler import PostScheduler
 from app.services.experiments import ChannelExperimentEngine, get_experiment_catalog
 from app.services.priority import ranked_channels
 from app.services import dest_weights
+from app.services import smart_schedule
 from app.services.pipeline_worker import PipelineWorker
 from app.services.render_guard import RenderBusyError
 from app.services.auth_youtube import YouTubeAuthManager, get_client_secrets_path
@@ -1357,6 +1358,146 @@ def auto_fill_schedule(db: Session = Depends(get_db)):
     return {"scheduled": count, "message": f"{count} novos clipes renderizados agendados na grade semanal."}
 
 
+# ---------- Agendamento inteligente (melhor horário por canal) ----------
+
+def _get_dest_channel(db: Session, channel_id: Optional[int]) -> DestinationChannel:
+    q = db.query(DestinationChannel)
+    ch = q.filter(DestinationChannel.id == channel_id).first() if channel_id is not None else q.order_by(DestinationChannel.id.asc()).first()
+    if not ch:
+        raise HTTPException(status_code=404, detail="Canal de destino não encontrado.")
+    return ch
+
+
+@app.get("/api/smart-schedule/niches")
+def smart_schedule_niches():
+    return smart_schedule.list_niches()
+
+
+@app.get("/api/smart-schedule/heatmap")
+def smart_schedule_heatmap(channel_id: Optional[int] = None, db: Session = Depends(get_db)):
+    """Mapa de calor 7 dias × 24h (nota 0-100) do canal + melhores horários livres."""
+    ch = _get_dest_channel(db, channel_id)
+    heatmap = smart_schedule.build_heatmap(db, ch)
+    heatmap["next_optimal"] = smart_schedule.next_optimal_slot(db, ch, heatmap=heatmap)
+    heatmap["suggestions"] = smart_schedule.suggest_slots(db, ch, count=4, heatmap=heatmap)
+    heatmap["smart_auto"] = smart_schedule.is_smart_auto_enabled(db)
+    heatmap["min_gap_hours"] = smart_schedule.get_min_gap_hours(db)
+    return heatmap
+
+
+@app.get("/api/smart-schedule/suggest")
+def smart_schedule_suggest(
+    channel_id: Optional[int] = None,
+    count: int = Query(5, ge=1, le=12),
+    post_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """Sugestões de horário livres (sem conflito). post_id: ignora o próprio post ao reagendar."""
+    ch = _get_dest_channel(db, channel_id)
+    heatmap = smart_schedule.build_heatmap(db, ch)
+    return {
+        "channel_id": ch.id,
+        "channel_name": ch.name,
+        "source": heatmap["source"],
+        "posts_used": heatmap["posts_used"],
+        "next_optimal": smart_schedule.next_optimal_slot(db, ch, exclude_post_id=post_id, heatmap=heatmap),
+        "suggestions": smart_schedule.suggest_slots(db, ch, count=count, exclude_post_id=post_id, heatmap=heatmap),
+    }
+
+
+@app.post("/api/smart-schedule/schedule")
+def smart_schedule_clip(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    """
+    "Agendar no melhor horário" em um clique.
+    - clip_id: clipe renderizado. Se ele já tem agendamento editável, esse agendamento é movido.
+    - post_id: alternativa, reagenda um post existente.
+    - channel_id (opcional): sem ele, usa o canal do post ou o canal mais atrasado em relação ao peso.
+    """
+    import datetime as _dt
+    post: Optional[ScheduledPost] = None
+    clip: Optional[ClipSegment] = None
+    if payload.get("post_id") not in (None, ""):
+        post = db.query(ScheduledPost).filter(ScheduledPost.id == int(payload["post_id"])).first()
+        if not post:
+            raise HTTPException(status_code=404, detail="Agendamento não encontrado.")
+        clip = post.clip
+    elif payload.get("clip_id") not in (None, ""):
+        clip = db.query(ClipSegment).filter(ClipSegment.id == int(payload["clip_id"])).first()
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clipe não encontrado.")
+        post = (
+            db.query(ScheduledPost)
+            .filter(ScheduledPost.clip_id == clip.id)
+            .filter(ScheduledPost.status.in_(EDITABLE_POST_STATUSES))
+            .order_by(ScheduledPost.id.desc())
+            .first()
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Envie clip_id ou post_id.")
+
+    if post is not None:
+        _ensure_post_editable(post)
+    elif not _is_valid_mp4(clip.clip_path if clip else None):
+        raise HTTPException(status_code=400, detail="Renderize o clipe antes de agendar (MP4 não encontrado).")
+
+    if payload.get("channel_id") not in (None, ""):
+        ch = _get_dest_channel(db, int(payload["channel_id"]))
+    elif post is not None:
+        ch = _get_dest_channel(db, post.destination_channel_id)
+    else:
+        ch = smart_schedule.pick_channel_for_clip(db)
+        if not ch:
+            raise HTTPException(status_code=400, detail="Nenhum canal de destino ativo com peso maior que 0%.")
+
+    exclude = post.id if (post is not None and post.destination_channel_id == ch.id) else None
+    slot = smart_schedule.next_optimal_slot(db, ch, exclude_post_id=exclude)
+    if not slot:
+        raise HTTPException(status_code=409, detail=f"Sem horário livre nos próximos 14 dias em {ch.name}.")
+    when = _dt.datetime.fromisoformat(slot["datetime"])
+
+    if post is None:
+        post = ScheduledPost(clip_id=clip.id, destination_channel_id=ch.id, scheduled_for=when, status="pending")
+        db.add(post)
+        clip.status = "scheduled"
+        clip.queue_rank = None
+    else:
+        post.scheduled_for = when
+        post.destination_channel_id = ch.id
+        _requeue_post(post)
+    db.commit()
+    db.refresh(post)
+    result = _serialize_post(post)
+    result["slot"] = slot
+    return result
+
+
+@app.patch("/api/destination-channels/{channel_id}/niche")
+def update_destination_channel_niche(channel_id: int, payload: Dict[str, Any], db: Session = Depends(get_db)):
+    ch = _get_dest_channel(db, channel_id)
+    raw = str(payload.get("niche") or "")
+    niche = smart_schedule.normalize_niche(raw)
+    if raw and niche == smart_schedule.DEFAULT_NICHE and raw.strip().lower() != smart_schedule.DEFAULT_NICHE:
+        raise HTTPException(status_code=400, detail="Nicho desconhecido.")
+    ch.niche = niche
+    db.commit()
+    return {"id": ch.id, "niche": niche}
+
+
+@app.put("/api/smart-schedule/settings")
+def update_smart_schedule_settings(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    if "smart_auto" in payload:
+        _upsert_setting(db, "SMART_SCHEDULE_AUTO", "true" if payload.get("smart_auto") else "false",
+                        "Auto-preencher usa o melhor horário de cada canal em vez da cadência fixa")
+    if "min_gap_hours" in payload:
+        try:
+            gap = max(0.5, min(24.0, float(payload.get("min_gap_hours"))))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="min_gap_hours inválido.")
+        _upsert_setting(db, "SMART_MIN_GAP_HOURS", str(gap), "Distância mínima entre dois posts do mesmo canal")
+    db.commit()
+    return {"smart_auto": smart_schedule.is_smart_auto_enabled(db), "min_gap_hours": smart_schedule.get_min_gap_hours(db)}
+
+
 # ---------- Editar / arrastar agendados ----------
 EDITABLE_POST_STATUSES = ("pending", "failed", "awaiting_oauth")
 OCCUPYING_POST_STATUSES = ("pending", "failed", "awaiting_oauth", "scheduled_on_youtube", "published")
@@ -1454,6 +1595,13 @@ def update_scheduled_post(post_id: int, payload: Dict[str, Any], db: Session = D
         post.scheduled_for = _parse_local_datetime(payload.get("scheduled_for"))
     if "destination_channel_id" in payload:
         post.destination_channel_id = _parse_destination(db, payload.get("destination_channel_id"))
+    clash = smart_schedule.find_conflict(db, post.destination_channel_id, post.scheduled_for, exclude_post_id=post.id)
+    if clash:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Já existe um vídeo nesse canal às {clash.scheduled_for.strftime('%d/%m %H:%M')}. Escolha outro horário (ou arraste para trocar).",
+        )
     _requeue_post(post)
     db.commit()
     db.refresh(post)
@@ -1551,6 +1699,7 @@ def list_destination_channels(db: Session = Depends(get_db)):
             "scheduled_count": scheduled_posts_count,
             "is_active": bool(c.is_active),
             "paused_weight": c.paused_weight,
+            "niche": smart_schedule.normalize_niche(getattr(c, "niche", None)),
         })
     return out
 
