@@ -169,7 +169,15 @@ class HighlightAnalyzer:
             )
             candidates.extend(extra)
 
+        # Trava de qualidade: só cria cortes cujo score atinja MIN_VIRALITY_SCORE (padrão 88)
+        min_score_row = self.db.query(SystemSetting).filter(SystemSetting.key == "MIN_VIRALITY_SCORE").first()
+        try:
+            min_score = max(1, min(100, int(str(min_score_row.value).strip()))) if (min_score_row and min_score_row.value) else 88
+        except Exception:
+            min_score = 88
+
         saved_clips: List[ClipSegment] = []
+        skipped_low_score = 0
         for cand in candidates:
             if len(saved_clips) >= target_clips:
                 break
@@ -184,6 +192,11 @@ class HighlightAnalyzer:
             if clip_dur < min_dur or clip_dur > max_dur + 2.0:
                 continue
 
+            cand_score = max(1, min(100, int(cand.get("virality_score", 0) or 0)))
+            if cand_score < min_score:
+                skipped_low_score += 1
+                continue
+
             is_over, _ = self.dedup.is_overlapping(video_id, s, e)
             if not is_over:
                 seg = self.dedup.register_segment(
@@ -193,11 +206,11 @@ class HighlightAnalyzer:
                     title=str(cand.get("title") or f"Corte de {video.title[:45]}")[:240],
                     hook_text=str(cand.get("hook_text") or "")[:280],
                     summary=str(cand.get("summary") or ""),
-                    virality_score=max(1, min(100, int(cand.get("virality_score", 85)))),
+                    virality_score=cand_score,
                     category=str(cand.get("category") or "highlight")[:45],
                     suggested_by=provider_used,
                 )
-                base_sc = seg.virality_score or 85
+                base_sc = seg.virality_score or min_score
                 seg.hook_score = max(1, min(100, int(cand.get("hook_score", min(99, base_sc + 2)))))
                 seg.pacing_score = max(1, min(100, int(cand.get("pacing_score", max(60, base_sc - 1)))))
                 seg.story_score = max(1, min(100, int(cand.get("story_score", base_sc))))

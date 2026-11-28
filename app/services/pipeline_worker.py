@@ -213,6 +213,12 @@ class PipelineWorker:
                 except Exception:
                     archived_index = {}
 
+                min_score_row = db.query(SystemSetting).filter(SystemSetting.key == "MIN_VIRALITY_SCORE").first()
+                try:
+                    min_quality_score = max(1, min(100, int(str(min_score_row.value).strip()))) if (min_score_row and min_score_row.value) else 88
+                except Exception:
+                    min_quality_score = 88
+
                 pre_analyzed = (
                     db.query(ClipSegment)
                     .filter(ClipSegment.status == "analyzed")
@@ -220,7 +226,8 @@ class PipelineWorker:
                 )
                 local_analyzed_count = sum(
                     1 for c in pre_analyzed
-                    if c.video and c.video.video_path and os.path.isfile(c.video.video_path)
+                    if (int(c.virality_score or 0) >= min_quality_score or c.queue_rank is not None)
+                    and c.video and c.video.video_path and os.path.isfile(c.video.video_path)
                 )
 
                 pending_video = None
@@ -412,6 +419,7 @@ class PipelineWorker:
                                     db.query(ClipSegment)
                                     .filter(ClipSegment.video_id == pv.id)
                                     .filter(ClipSegment.status == "analyzed")
+                                    .filter(ClipSegment.virality_score >= min_quality_score)
                                     .count()
                                 )
                                 if pending_clips_cnt > 0:
