@@ -45,19 +45,24 @@ KNOWN_GAMES = [
     ("React", ["reage", "react", "reagindo"]),
 ]
 
-SEO_SYSTEM_PROMPT = """Você é um estrategista de SEO e editor brasileiro especialista em YouTube Shorts de streamers e gamers.
+SEO_SYSTEM_PROMPT = """Você é um editor humano brasileiro especialista em canais grandes de Cortes de Lives no YouTube Shorts.
 
 REGRAS OBRIGATÓRIAS:
-- NUNCA repita o título genérico da live inteira! Cada corte TEM que ter um título ÚNICO e chamativo baseado no que REALMENTE é falado ou acontece naquele trecho específico.
-- NUNCA invente fatos que não estejam na fala transcrita ou no contexto do vídeo.
-- NUNCA corte palavras no meio e NÃO use TUDO EM MAIÚSCULO.
-- Varie a estrutura do título: use citações reais da fala, perguntas instigantes, contraste de situação, humor direto ou mini-história.
+- Leia a transcrição do trecho e entenda O QUE REALMENTE ACONTECEU na cena (a piada, o susto, o rage, a jogada ou a conversa).
+- Ignore falas de NPCs em inglês do jogo (ex: "Here", "Back", "Season", "Reasonable", "Permanent", "Grand", "Cocaine", "Ready"). Foque no que o STREAMER disse ou viveu!
+- PROIBIDO usar templates robóticos como: "Você concordou com...", "Faria igual...", "Como o X saiu dessa? (palavra)", "A reação do X com Y", "Alanzoka · Palavra", "Em poucos segundos na live...", "Tudo parecia normal até...".
+- NUNCA corte frases no meio e NÃO use TUDO EM MAIÚSCULO.
+- Exemplos de TÍTULOS BONS (naturais, humanos e clicáveis):
+  * Alanzoka não acreditou quando o navio começou a afundar no GTA 6
+  * LipaoGamer tentou pousar o avião na praia e deu tudo errado no GTA 6
+  * Alanzoka revoltado: "Mentira que eu vou ter que roubar de novo"
+  * O plano do Paulinho no assalto a banco saiu completamente do controle
 
 Formato obrigatório:
-1. "title": 30 a 72 caracteres, forte e único em PT-BR (máximo 1 emoji). Mencione o streamer e/ou o jogo de forma natural.
-2. "description": 2 a 3 frases envolventes dando contexto real do corte + uma pergunta para gerar comentários.
-3. "tags": lista de 22 a 30 tags de busca em minúsculas (sem #), misturando cauda curta e cauda longa (streamer, jogo, assunto falado no trecho, cortes, lives, shorts brasil, gameplay).
-4. "hashtags": lista de 12 a 15 hashtags (com #), começando com #shorts + streamer + jogo + tema do trecho + nicho gamer.
+1. "title": 32 a 72 caracteres, natural, humano e único em PT-BR (máximo 1 emoji ou nenhum).
+2. "description": 2 a 3 frases envolventes explicando a cena real do corte + 1 pergunta natural para gerar comentários.
+3. "tags": lista de 22 a 30 tags de busca em minúsculas (sem #), fiéis ao streamer, ao jogo e ao assunto real da cena.
+4. "hashtags": lista de 12 a 15 hashtags (com #), começando com #shorts + streamer + jogo + tema real + nicho gamer.
 
 Retorne APENAS JSON válido:
 {
@@ -213,129 +218,152 @@ class ViralSEOEngine:
         transcript_excerpt: str,
         style_angle: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        provider = self._get_setting("AI_PROVIDER", default="offline").lower()
-        if provider == "offline":
-            return None
+        from app.services.key_pool import execute_with_key_pool, parse_api_keys
+
+        configured = self._get_setting("AI_PROVIDER", default="groq").lower()
+        provider_order: List[str] = []
+        for p in [configured, "groq", "gemini", "openai", "claude", "ollama"]:
+            if p in ("groq", "gemini", "openai", "claude", "ollama") and p not in provider_order:
+                provider_order.append(p)
 
         angle_hints = {
-            "curiosidade": "Ângulo obrigatório: CURIOSIDADE / OPEN LOOP — crie tensão sem entregar o desfecho no título.",
-            "choque_reacao": "Ângulo obrigatório: REAÇÃO / CHOQUE DIRETO — foque na expressão ou reação extrema do streamer.",
-            "pergunta_debate": "Ângulo obrigatório: PERGUNTA / DEBATE — faça uma pergunta direta no título ou gancho que provoque comentários.",
-            "direto_curto": "Ângulo obrigatório: ULTRA-CURTO — título de no máximo 42 caracteres, seco, direto ao ponto e sem enfeites.",
-            "storytelling": "Ângulo obrigatório: STORYTELLING — abra como uma mini-história ('Tudo ia bem até...', 'Em 5 segundos...').",
+            "curiosidade": "Ângulo: CURIOSIDADE — desperte curiosidade sobre o desfecho sem entregar o final.",
+            "choque_reacao": "Ângulo: REAÇÃO — destaque a reação real do streamer diante do que aconteceu.",
+            "pergunta_debate": "Ângulo: DEBATE — faça uma pergunta natural específica sobre o que aconteceu na cena (nunca genérica).",
+            "direto_curto": "Ângulo: CURTO E DIRETO — título curto (32 a 48 chars), seco e natural.",
+            "storytelling": "Ângulo: MINI-HISTÓRIA — resuma o conflito da cena em 1 frase natural.",
         }
         angle_line = f"\n{angle_hints[style_angle]}" if style_angle in angle_hints else ""
 
         user_prompt = (
             f"Streamer: {streamer}\n"
             f"Jogo/Tema: {game or 'Gameplay / Live'}\n"
-            f"Título original do vídeo: {video_title}\n"
-            f"Categoria do momento: {category}\n"
-            f"Trecho falado no corte: {transcript_excerpt or '(sem transcrição — use o contexto do título)'}"
+            f"Título da live: {video_title}\n"
+            f"Categoria: {category}\n"
+            f"Transcrição real deste corte:\n{transcript_excerpt or '(sem transcrição — use o contexto do título da live)'}"
             f"{angle_line}"
         )
 
-        try:
-            if provider == "gemini":
-                key = self._get_setting("GEMINI_API_KEY", env_fallback="GEMINI_API_KEY")
-                if not key:
-                    return None
-                model = self._get_setting("GEMINI_MODEL", default="gemini-2.5-flash")
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-                payload = {
-                    "system_instruction": {"parts": [{"text": SEO_SYSTEM_PROMPT}]},
-                    "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-                    "generationConfig": {"temperature": 0.7, "responseMimeType": "application/json"},
-                }
-                with httpx.Client(timeout=25.0) as client:
-                    r = client.post(url, json=payload)
-                    r.raise_for_status()
-                    return _extract_json_object(r.json()["candidates"][0]["content"]["parts"][0]["text"])
+        for provider in provider_order:
+            try:
+                if provider == "groq":
+                    raw_keys = self._get_setting("GROQ_API_KEY", env_fallback="GROQ_API_KEY")
+                    if not parse_api_keys(raw_keys):
+                        continue
+                    model = self._get_setting("GROQ_MODEL", default="llama-3.3-70b-versatile")
+                    def _call_groq(key: str):
+                        with httpx.Client(timeout=25.0) as client:
+                            r = client.post(
+                                "https://api.groq.com/openai/v1/chat/completions",
+                                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                                json={
+                                    "model": model,
+                                    "temperature": 0.75,
+                                    "messages": [
+                                        {"role": "system", "content": SEO_SYSTEM_PROMPT},
+                                        {"role": "user", "content": user_prompt},
+                                    ],
+                                },
+                            )
+                            r.raise_for_status()
+                            return _extract_json_object(r.json()["choices"][0]["message"]["content"])
+                    res, _ = execute_with_key_pool("groq", raw_keys, _call_groq)
+                    if res:
+                        return res
 
-            if provider == "groq":
-                key = self._get_setting("GROQ_API_KEY", env_fallback="GROQ_API_KEY")
-                if not key:
-                    return None
-                model = self._get_setting("GROQ_MODEL", default="llama-3.3-70b-versatile")
-                with httpx.Client(timeout=25.0) as client:
-                    r = client.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                        json={
-                            "model": model,
-                            "temperature": 0.7,
-                            "messages": [
-                                {"role": "system", "content": SEO_SYSTEM_PROMPT},
-                                {"role": "user", "content": user_prompt},
-                            ],
-                        },
-                    )
-                    r.raise_for_status()
-                    return _extract_json_object(r.json()["choices"][0]["message"]["content"])
+                elif provider == "gemini":
+                    raw_keys = self._get_setting("GEMINI_API_KEY", env_fallback="GEMINI_API_KEY")
+                    if not parse_api_keys(raw_keys):
+                        continue
+                    model = self._get_setting("GEMINI_MODEL", default="gemini-2.5-flash")
+                    def _call_gemini(key: str):
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+                        payload = {
+                            "system_instruction": {"parts": [{"text": SEO_SYSTEM_PROMPT}]},
+                            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+                            "generationConfig": {"temperature": 0.75, "responseMimeType": "application/json"},
+                        }
+                        with httpx.Client(timeout=25.0) as client:
+                            r = client.post(url, json=payload)
+                            r.raise_for_status()
+                            return _extract_json_object(r.json()["candidates"][0]["content"]["parts"][0]["text"])
+                    res, _ = execute_with_key_pool("gemini", raw_keys, _call_gemini)
+                    if res:
+                        return res
 
-            if provider == "openai":
-                key = self._get_setting("OPENAI_API_KEY", env_fallback="OPENAI_API_KEY")
-                if not key:
-                    return None
-                model = self._get_setting("OPENAI_MODEL", default="gpt-4o-mini")
-                with httpx.Client(timeout=25.0) as client:
-                    r = client.post(
-                        "https://api.openai.com/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                        json={
-                            "model": model,
-                            "temperature": 0.7,
-                            "messages": [
-                                {"role": "system", "content": SEO_SYSTEM_PROMPT},
-                                {"role": "user", "content": user_prompt},
-                            ],
-                        },
-                    )
-                    r.raise_for_status()
-                    return _extract_json_object(r.json()["choices"][0]["message"]["content"])
+                elif provider == "openai":
+                    raw_keys = self._get_setting("OPENAI_API_KEY", env_fallback="OPENAI_API_KEY")
+                    if not parse_api_keys(raw_keys):
+                        continue
+                    model = self._get_setting("OPENAI_MODEL", default="gpt-4o-mini")
+                    def _call_openai(key: str):
+                        with httpx.Client(timeout=25.0) as client:
+                            r = client.post(
+                                "https://api.openai.com/openai/v1/chat/completions",
+                                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                                json={
+                                    "model": model,
+                                    "temperature": 0.75,
+                                    "messages": [
+                                        {"role": "system", "content": SEO_SYSTEM_PROMPT},
+                                        {"role": "user", "content": user_prompt},
+                                    ],
+                                },
+                            )
+                            r.raise_for_status()
+                            return _extract_json_object(r.json()["choices"][0]["message"]["content"])
+                    res, _ = execute_with_key_pool("openai", raw_keys, _call_openai)
+                    if res:
+                        return res
 
-            if provider == "claude":
-                key = self._get_setting("ANTHROPIC_API_KEY", env_fallback="ANTHROPIC_API_KEY")
-                if not key:
-                    return None
-                model = self._get_setting("CLAUDE_MODEL", default="claude-3-5-haiku-latest")
-                with httpx.Client(timeout=25.0) as client:
-                    r = client.post(
-                        "https://api.anthropic.com/v1/messages",
-                        headers={
-                            "x-api-key": key,
-                            "anthropic-version": "2023-06-01",
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "model": model,
-                            "max_tokens": 512,
-                            "system": SEO_SYSTEM_PROMPT,
-                            "messages": [{"role": "user", "content": user_prompt}],
-                        },
-                    )
-                    r.raise_for_status()
-                    return _extract_json_object(r.json()["content"][0]["text"])
+                elif provider == "claude":
+                    raw_keys = self._get_setting("ANTHROPIC_API_KEY", env_fallback="ANTHROPIC_API_KEY")
+                    if not parse_api_keys(raw_keys):
+                        continue
+                    model = self._get_setting("CLAUDE_MODEL", default="claude-3-5-haiku-latest")
+                    def _call_claude(key: str):
+                        with httpx.Client(timeout=25.0) as client:
+                            r = client.post(
+                                "https://api.anthropic.com/v1/messages",
+                                headers={
+                                    "x-api-key": key,
+                                    "anthropic-version": "2023-06-01",
+                                    "Content-Type": "application/json",
+                                },
+                                json={
+                                    "model": model,
+                                    "max_tokens": 600,
+                                    "system": SEO_SYSTEM_PROMPT,
+                                    "messages": [{"role": "user", "content": user_prompt}],
+                                },
+                            )
+                            r.raise_for_status()
+                            return _extract_json_object(r.json()["content"][0]["text"])
+                    res, _ = execute_with_key_pool("anthropic", raw_keys, _call_claude)
+                    if res:
+                        return res
 
-            if provider == "ollama":
-                base = self._get_setting("OLLAMA_URL", env_fallback="OLLAMA_URL", default="http://localhost:11434")
-                model = self._get_setting("OLLAMA_MODEL", default="llama3.1")
-                with httpx.Client(timeout=45.0) as client:
-                    r = client.post(
-                        f"{base.rstrip('/')}/api/chat",
-                        json={
-                            "model": model,
-                            "stream": False,
-                            "messages": [
-                                {"role": "system", "content": SEO_SYSTEM_PROMPT},
-                                {"role": "user", "content": user_prompt},
-                            ],
-                        },
-                    )
-                    r.raise_for_status()
-                    return _extract_json_object(r.json()["message"]["content"])
-        except Exception as exc:
-            logger.warning("SEO LLM (%s) falhou, usando motor PT-BR offline: %s", provider, exc)
+                elif provider == "ollama" and configured == "ollama":
+                    base = self._get_setting("OLLAMA_URL", env_fallback="OLLAMA_URL", default="http://localhost:11434")
+                    model = self._get_setting("OLLAMA_MODEL", default="llama3.1")
+                    with httpx.Client(timeout=45.0) as client:
+                        r = client.post(
+                            f"{base.rstrip('/')}/api/chat",
+                            json={
+                                "model": model,
+                                "stream": False,
+                                "messages": [
+                                    {"role": "system", "content": SEO_SYSTEM_PROMPT},
+                                    {"role": "user", "content": user_prompt},
+                                ],
+                            },
+                        )
+                        r.raise_for_status()
+                        res = _extract_json_object(r.json()["message"]["content"])
+                        if res:
+                            return res
+            except Exception as exc:
+                logger.warning("SEO LLM (%s) falhou, tentando próximo provedor: %s", provider, exc)
 
         return None
 
@@ -347,13 +375,26 @@ class ViralSEOEngine:
             return s
         return s[:max_len].rsplit(" ", 1)[0].strip(" -|:;,.")
 
+    @staticmethod
+    def _looks_english_npc_line(text: str) -> bool:
+        low = f" {(text or '').lower()} "
+        en_markers = (" the ", " you ", " your ", " we're ", " i'm ", " going to ", " don't ", " here ", " back ", " season ", " reasonable ", " permanent ", " over there ", " friend ", " ready")
+        pt_markers = (" que ", " não ", " nao ", " mano", " velho", " cara", " pra ", " tá ", " ta ", " eu ", " você ", " voce ", " gente ", " aqui ", " isso ", " esse ", " essa ", " meu ", " minha ", " porra", " caralho")
+        en_hits = sum(1 for m in en_markers if m in low)
+        pt_hits = sum(1 for m in pt_markers if m in low)
+        return en_hits >= 1 and pt_hits == 0
+
     def _extract_spoken_keywords(self, text: str) -> List[str]:
         stop = {
             "para", "como", "mais", "muito", "isso", "esse", "essa", "aqui", "agora",
             "tava", "estava", "entao", "então", "porque", "quando", "onde", "quem",
             "qual", "sobre", "tudo", "nada", "cara", "mano", "gente", "você", "voce",
             "eles", "elas", "nosso", "nossa", "pelo", "pela", "comigo", "ainda", "assim",
-            "pode", "fazer", "feito", "aqui", "dessa", "desse", "disso", "mesmo", "nunca",
+            "pode", "fazer", "feito", "dessa", "desse", "disso", "mesmo", "nunca",
+            "here", "back", "season", "reasonable", "permanent", "grand", "cocaine",
+            "ready", "going", "kill", "friend", "forget", "upstairs", "looking", "over",
+            "there", "your", "knees", "chum", "bucket", "hurry", "with", "that", "means",
+            "open", "again", "just", "from", "this", "they", "have", "what", "when",
         }
         words = re.findall(r"[A-Za-zÀ-ÿ0-9]{4,}", (text or "").lower())
         freq: Dict[str, int] = {}
@@ -381,74 +422,41 @@ class ViralSEOEngine:
         clean_vt = re.sub(r"\s+", " ", clean_vt).strip(" -|!?:")
         if clean_vt and sum(1 for c in clean_vt if c.isupper()) > len(clean_vt) * 0.55:
             clean_vt = clean_vt.capitalize()
-        topic = self._clean_word_truncate(clean_vt, 42)
+        topic = self._clean_word_truncate(clean_vt, 46)
 
-        # Escolhe uma frase ÚNICA da transcrição deste corte (usando seed para não repetir a mesma frase)
+        # Escolhe apenas frases COMPLETAS em português faladas pelo streamer (ignora NPCs em inglês!)
         sentences = [
             s.strip() for s in re.split(r"[.!?\n]+", transcript_excerpt or "")
-            if 14 <= len(s.strip()) <= 68
+            if 16 <= len(s.strip()) <= 66 and not self._looks_english_npc_line(s)
         ]
         spoken_snippet = ""
         if sentences:
             chosen_s = sentences[seed % len(sentences)]
-            spoken_snippet = self._clean_word_truncate(chosen_s, 46)
+            # Só usa se não cortar no meio (termina limpo)
+            spoken_snippet = self._clean_word_truncate(chosen_s, 48)
 
         spoken_kws = self._extract_spoken_keywords(f"{transcript_excerpt} {video_title}")
-        kw_focus = spoken_kws[seed % len(spoken_kws)].capitalize() if spoken_kws else ""
 
         if spoken_snippet:
-            base_candidates = [
+            pool = [
                 f'{streamer}{in_game}: "{spoken_snippet}"',
                 f'"{spoken_snippet}" — {streamer}{in_game}',
-                f"{spoken_snippet} | {streamer}",
-                f"Quando o {streamer} mandou: \"{self._clean_word_truncate(spoken_snippet, 34)}\"",
-                f"{streamer} {in_game.strip()} — {spoken_snippet}",
-                f"Olha o papo do {streamer}: \"{self._clean_word_truncate(spoken_snippet, 36)}\"",
+                f'{streamer} mandou essa{in_game}: "{self._clean_word_truncate(spoken_snippet, 36)}"',
+                f'{spoken_snippet} ({streamer}{in_game})',
             ]
         elif topic:
-            base_candidates = [
-                f"{streamer} — {topic}",
-                f"{topic} ({streamer}{in_game})",
-                f"O momento de {kw_focus or topic} do {streamer}{in_game}",
-                f"{streamer} enfrentando {kw_focus or topic}{in_game}",
-                f"Como o {streamer} lidou com {kw_focus or topic}{in_game}",
-                f"{topic} | Cortes do {streamer}",
+            pool = [
+                f"{streamer}{in_game}: {topic}",
+                f"{topic} — {streamer}",
+                f"Melhor momento do {streamer}{in_game}: {self._clean_word_truncate(topic, 34)}",
             ]
         else:
-            base_candidates = [
-                f"{streamer} jogando{in_game} — melhor corte",
-                f"Momento da gameplay do {streamer}{in_game}",
-                f"O que rolou na live do {streamer}{in_game}",
-                f"Corte selecionado: {streamer}{in_game}",
+            pool = [
+                f"Melhor momento do {streamer}{in_game}",
+                f"Corte da live do {streamer}{in_game}",
             ]
 
-        angle_templates = {
-            "curiosidade": [
-                f"Como o {streamer} saiu dessa{in_game}?" + (f" ({kw_focus})" if kw_focus else ""),
-                f"O detalhe que quase passou batido: {streamer}{in_game}",
-                f'"{spoken_snippet}" — o que aconteceu depois? ({streamer})' if spoken_snippet else f"{streamer}: {topic}",
-            ],
-            "choque_reacao": [
-                f"A reação do {streamer} com {kw_focus or 'isso'}{in_game}",
-                f'{streamer} reagindo{in_game}: "{self._clean_word_truncate(spoken_snippet, 34)}"' if spoken_snippet else f"{streamer} ao vivo{in_game}: {topic}",
-            ],
-            "pergunta_debate": [
-                f"O que você faria no lugar do {streamer}{in_game}?",
-                f"Você concordou com o {streamer} nessa?{in_game}",
-                f"Faria igual ao {streamer} ou diferente?{in_game}",
-            ],
-            "direto_curto": [
-                f'{streamer}: "{self._clean_word_truncate(spoken_snippet, 24)}"' if spoken_snippet else f"{streamer}{in_game}",
-                f"{streamer} · {kw_focus or self._clean_word_truncate(topic, 24)}",
-            ],
-            "storytelling": [
-                f"Tudo parecia normal até {kw_focus or 'esse momento'} ({streamer}{in_game})",
-                f"Em poucos segundos na live do {streamer}{in_game}: {self._clean_word_truncate(spoken_snippet or topic, 28)}",
-            ],
-        }
-
-        pool = angle_templates.get(style_angle or "") or base_candidates
-        title = self._clean_word_truncate(rng.choice(pool), 44 if style_angle == "direto_curto" else 72)
+        title = self._clean_word_truncate(rng.choice(pool), 48 if style_angle == "direto_curto" else 72)
 
         context_line = (
             f"Corte selecionado da live de {streamer}{in_game}"

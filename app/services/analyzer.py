@@ -217,9 +217,8 @@ class HighlightAnalyzer:
                 seg.crop_mode = default_crop
                 try:
                     from app.services.seo_engine import ViralSEOEngine
-                    seo = ViralSEOEngine(self.db).generate_for_clip(seg, prefer_llm=False)
-                    # Se veio do detector offline, troca título bruto/cortado pelo título PT-BR de alto CTR
-                    if not provider_used.startswith("ai:"):
+                    seo = ViralSEOEngine(self.db).generate_for_clip(seg, prefer_llm=True)
+                    if seo.get("title"):
                         seg.title = seo["title"]
                     ed_cfg = {"seo_description": seo["description"], "seo_tags": seo["tags_csv"], "seo_hashtags": seo["hashtags_str"]}
                     seg.editor_config_json = json.dumps(ed_cfg, ensure_ascii=False)
