@@ -385,15 +385,27 @@ class ChannelExperimentEngine:
         if not include_analyzed:
             candidates = [c for c in candidates if _has_valid_rendered_file(c)]
 
-        # Carrega horários já ocupados neste canal para NUNCA agendar 2 vídeos no mesmo horário
-        occupied_dts = [
-            p.scheduled_for
-            for p in self.db.query(ScheduledPost)
+        # Carrega horários já ocupados neste canal (locais + YouTube real) para respeitar 4h de post recente e 5h entre agendados
+        from app.services.uploader import fetch_channel_youtube_timeline
+
+        local_posts = (
+            self.db.query(ScheduledPost)
             .filter(ScheduledPost.destination_channel_id == exp.destination_channel_id)
             .filter(ScheduledPost.status.in_(["pending", "awaiting_oauth", "scheduled_on_youtube", "published"]))
             .all()
-            if p.scheduled_for
-        ]
+        )
+        occupied_sched_dts = [p.scheduled_for for p in local_posts if p.scheduled_for]
+        recent_posted_dts = [p.published_at or p.scheduled_for for p in local_posts if p.status == "published" and (p.published_at or p.scheduled_for)]
+
+        yt_timeline = fetch_channel_youtube_timeline(self.db, exp.destination_channel)
+        for item in yt_timeline:
+            dt_item = item.get("datetime")
+            if not dt_item:
+                continue
+            if item.get("is_scheduled"):
+                occupied_sched_dts.append(dt_item)
+            else:
+                recent_posted_dts.append(dt_item)
 
         assigned_count = 0
         for slot in plan:
@@ -407,10 +419,14 @@ class ChannelExperimentEngine:
                 self._apply_variant_to_clip(clip, slot, apply_seo=True)
 
             slot_dt = datetime.datetime.fromisoformat(slot["scheduled_for"])
-            # Se já existe vídeo agendado nesse horário (±60 min), empurra para depois até achar horário livre
+            # Regra: < 4h de vídeo postado recentemente OU < 5h de outro vídeo agendado -> empurra para o próximo horário livre!
             guard = 0
-            while any(abs((slot_dt - occ).total_seconds()) < 3600 for occ in occupied_dts) and guard < 72:
-                slot_dt += datetime.timedelta(hours=2)
+            while guard < 96:
+                too_close_post = any(abs((slot_dt - pub).total_seconds()) < 4 * 3600 for pub in recent_posted_dts)
+                too_close_sched = any(abs((slot_dt - occ).total_seconds()) < 5 * 3600 for occ in occupied_sched_dts)
+                if not too_close_post and not too_close_sched:
+                    break
+                slot_dt += datetime.timedelta(hours=1)
                 guard += 1
 
             # Atualiza o slot do plano com o horário real livre escolhido
@@ -418,7 +434,7 @@ class ChannelExperimentEngine:
             slot["time"] = slot_dt.strftime("%H:%M")
             slot["date"] = slot_dt.strftime("%d/%m/%Y")
             slot["day_name"] = PT_BR_WEEKDAYS[slot_dt.weekday()]
-            occupied_dts.append(slot_dt)
+            occupied_sched_dts.append(slot_dt)
 
             variant_payload = {
                 "day_index": slot["day_index"],

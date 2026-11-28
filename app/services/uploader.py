@@ -16,12 +16,107 @@ from app.database.models import ScheduledPost, SystemSetting
 
 logger = logging.getLogger("YouTubeUploader")
 _CHANNEL_UPLOAD_COOLDOWN: Dict[int, float] = {}
+_YT_TIMELINE_CACHE: Dict[int, tuple[float, list]] = {}
 
 
 def is_channel_upload_rate_limited(channel_id: int) -> bool:
     import time as _time
     until = _CHANNEL_UPLOAD_COOLDOWN.get(int(channel_id), 0.0)
     return _time.time() < until
+
+
+def fetch_channel_youtube_timeline(
+    db: Session,
+    channel: Any,
+    cache_ttl_seconds: int = 600,
+) -> list:
+    """
+    Consulta a conta YouTube conectada (com cache de 10 min para poupar cota) e retorna
+    vídeos postados recentemente e vídeos JÁ agendados (status.publishAt) diretamente no YouTube,
+    convertidos para o fuso horário local (naive datetime).
+    """
+    import time as _time
+    if not channel or not getattr(channel, "oauth_credentials_path", None):
+        return []
+    token_path = channel.oauth_credentials_path
+    if not os.path.exists(token_path):
+        return []
+
+    now_ts = _time.time()
+    cached = _YT_TIMELINE_CACHE.get(channel.id)
+    if cached and (now_ts - cached[0]) < cache_ttl_seconds:
+        return cached[1]
+
+    tz_row = db.query(SystemSetting).filter(SystemSetting.key == "TIMEZONE").first()
+    tz_name = (tz_row.value or "America/Sao_Paulo").strip() if tz_row else "America/Sao_Paulo"
+    try:
+        local_tz = ZoneInfo(tz_name)
+    except Exception:
+        local_tz = ZoneInfo("America/Sao_Paulo")
+
+    entries = []
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        from googleapiclient.discovery import build
+
+        creds = Credentials.from_authorized_user_file(token_path)
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            with open(token_path, "w", encoding="utf-8") as f:
+                f.write(creds.to_json())
+
+        youtube = build("youtube", "v3", credentials=creds)
+        ch_resp = youtube.channels().list(part="contentDetails", mine=True).execute()
+        items = ch_resp.get("items") or []
+        if not items:
+            _YT_TIMELINE_CACHE[channel.id] = (now_ts, [])
+            return []
+
+        uploads_pl = (items[0].get("contentDetails", {}).get("relatedPlaylists") or {}).get("uploads")
+        if not uploads_pl:
+            _YT_TIMELINE_CACHE[channel.id] = (now_ts, [])
+            return []
+
+        pl_resp = youtube.playlistItems().list(part="contentDetails", playlistId=uploads_pl, maxResults=15).execute()
+        vid_ids = [
+            it["contentDetails"]["videoId"]
+            for it in (pl_resp.get("items") or [])
+            if it.get("contentDetails", {}).get("videoId")
+        ]
+        if not vid_ids:
+            _YT_TIMELINE_CACHE[channel.id] = (now_ts, [])
+            return []
+
+        v_resp = youtube.videos().list(part="snippet,status", id=",".join(vid_ids)).execute()
+        for vi in (v_resp.get("items") or []):
+            vid = vi.get("id")
+            snip = vi.get("snippet") or {}
+            st = vi.get("status") or {}
+            publish_at = st.get("publishAt")
+            published_at = snip.get("publishedAt")
+            raw_iso = publish_at or published_at
+            if not raw_iso:
+                continue
+            try:
+                utc_dt = datetime.datetime.fromisoformat(str(raw_iso).replace("Z", "+00:00"))
+                local_dt = utc_dt.astimezone(local_tz).replace(tzinfo=None)
+            except Exception:
+                continue
+            is_scheduled = bool(publish_at and st.get("privacyStatus") == "private")
+            entries.append({
+                "youtube_video_id": vid,
+                "title": snip.get("title") or f"Vídeo YouTube {vid}",
+                "datetime": local_dt,
+                "is_scheduled": is_scheduled,
+                "privacy_status": st.get("privacyStatus") or "public",
+                "youtube_url": f"https://www.youtube.com/shorts/{vid}",
+            })
+    except Exception as exc:
+        logger.debug("Não foi possível consultar timeline YouTube do canal #%s: %s", channel.id, exc)
+
+    _YT_TIMELINE_CACHE[channel.id] = (now_ts, entries)
+    return entries
 
 
 def to_rfc3339_utc(local_dt: datetime.datetime, tz_name: str = "America/Sao_Paulo") -> str:

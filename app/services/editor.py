@@ -182,9 +182,17 @@ class VideoEditor:
             raise ValueError(f"Vídeo original {clip.video_id} não encontrado no banco.")
 
         if not video.video_path or not os.path.exists(video.video_path):
+            # Se a live já foi arquivada no Google Drive, restaura automaticamente para renderizar/reaproveitar!
+            try:
+                from app.services.drive_archiver import DriveArchiver
+                DriveArchiver(self.db).restore_video(video.id)
+                self.db.refresh(video)
+            except Exception:
+                pass
+        if not video.video_path or not os.path.exists(video.video_path):
             raise FileNotFoundError(
                 f"Arquivo de vídeo original não encontrado para clipe #{clip_id} ({video.video_path or 'sem download'}). "
-                f"Baixe o vídeo primeiro ou reprocesse-o na fila."
+                f"Baixe o vídeo primeiro ou restaure do Google Drive."
             )
 
         start_sec = float(clip.start_time)
@@ -678,6 +686,16 @@ class VideoEditor:
             post.append("eq=contrast=1.06:saturation=1.12")
             if auto_color.get("glow"):
                 glow_enabled = True
+        else:
+            # Micro-variação sutil de saturação/contraste por clipe (natural aos olhos, evita duplicidade de assinatura visual)
+            cid_seed = int(getattr(clip, "id", 1) or 1)
+            sat_offsets = [1.02, 1.04, 0.98, 1.05, 1.01, 0.99, 1.06, 1.03]
+            con_offsets = [1.01, 1.02, 1.00, 1.03, 0.99, 1.02, 1.01, 1.00]
+            bri_offsets = [0.005, -0.005, 0.008, 0.0, -0.008, 0.004, -0.004, 0.006]
+            sat_v = sat_offsets[cid_seed % len(sat_offsets)]
+            con_v = con_offsets[(cid_seed * 3) % len(con_offsets)]
+            bri_v = bri_offsets[(cid_seed * 5) % len(bri_offsets)]
+            post.append(f"eq=saturation={sat_v:.2f}:contrast={con_v:.2f}:brightness={bri_v:.3f}")
 
         if post:
             parts.append(f"{cur_v}{','.join(post)}[vpost]")
@@ -815,6 +833,8 @@ class VideoEditor:
             cmd.append("-an")
 
         cmd.extend([
+            "-map_metadata", "-1",
+            "-fflags", "+bitexact",
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
             "-preset", "veryfast",

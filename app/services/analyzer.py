@@ -91,7 +91,7 @@ class HighlightAnalyzer:
     def analyze_video(
         self,
         video_id: str,
-        max_clips: int = 7,
+        max_clips: int = 20,
         min_clips: int = 3,
         min_duration: Optional[float] = None,
         max_duration: Optional[float] = None,
@@ -114,12 +114,13 @@ class HighlightAnalyzer:
         if duration < min_dur + 2:
             min_dur = max(5.0, duration * 0.5)
 
-        if duration >= 1200.0:
-            target_clips = min(7, max_clips)
-        elif duration >= 600.0:
-            target_clips = max(min_clips, min(5, max_clips))
-        else:
+        # Extrai o máximo de cortes não-sobrepostos possíveis de acordo com a duração da live/vídeo
+        # Ex: 15 min -> ~6 cortes; 30 min -> ~11 cortes; 1h+ -> até 20-25 cortes antes de arquivar no Drive
+        dynamic_target = max(min_clips, int(duration // 160.0))
+        if duration < 300.0:
             target_clips = max(1, min(min_clips, int(duration // max(min_dur, 15.0)) or 1))
+        else:
+            target_clips = min(max_clips, max(min_clips, dynamic_target))
 
         available_windows = self.dedup.get_available_windows(
             video_id, duration, min_window_duration=min_dur

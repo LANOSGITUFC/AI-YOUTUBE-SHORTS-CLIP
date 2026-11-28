@@ -224,8 +224,8 @@ class PipelineWorker:
                             transcriber.transcribe_video(pending_video.id)
                             results["transcriptions"] += 1
 
-                            self._log("info", f"Detectando 3 a 7 momentos virais em {pending_video.id}...", stage="analyzing", progress=68)
-                            clips = analyzer.analyze_video(pending_video.id, max_clips=7, min_clips=3)
+                            self._log("info", f"Detectando máximo de cortes inéditos em {pending_video.id}...", stage="analyzing", progress=68)
+                            clips = analyzer.analyze_video(pending_video.id, max_clips=20, min_clips=3)
                             results["clips_generated"] += len(clips)
                             self._log("success", f"{len(clips)} cortes criados para {pending_video.title[:45]}", stage="analyzing", progress=74)
                     except Exception as e:

@@ -123,22 +123,39 @@ class PostScheduler:
         if not channel:
             return []
 
-        _, _, interval_h, _ = self.get_schedule_cadence()
-        min_gap = datetime.timedelta(hours=max(1.0, interval_h - 1.5))
+        from app.services.uploader import fetch_channel_youtube_timeline
 
-        existing_dts = [
-            p.scheduled_for
-            for p in self.db.query(ScheduledPost)
+        _, _, interval_h, _ = self.get_schedule_cadence()
+        min_own_gap = datetime.timedelta(hours=max(5.0, interval_h - 1.5))
+        min_sched_proximity = datetime.timedelta(hours=5)
+        min_recent_post_gap = datetime.timedelta(hours=4)
+
+        local_posts = (
+            self.db.query(ScheduledPost)
             .filter(ScheduledPost.destination_channel_id == channel_id)
             .filter(ScheduledPost.status.in_(["pending", "awaiting_oauth", "scheduled_on_youtube", "published"]))
             .all()
-            if p.scheduled_for
-        ]
+        )
+        existing_local_dts = [p.scheduled_for for p in local_posts if p.scheduled_for]
+        recent_posted_dts = [p.published_at or p.scheduled_for for p in local_posts if p.status == "published" and (p.published_at or p.scheduled_for)]
+
+        # Reconhece vídeos postados recentemente (< 4h) e vídeos JÁ agendados diretamente naquela conta do YouTube
+        yt_timeline = fetch_channel_youtube_timeline(self.db, channel)
+        yt_scheduled_dts = [it["datetime"] for it in yt_timeline if it.get("is_scheduled") and it.get("datetime")]
+        yt_posted_dts = [it["datetime"] for it in yt_timeline if not it.get("is_scheduled") and it.get("datetime")]
+        recent_posted_dts.extend(yt_posted_dts)
 
         candidates = self._generate_cadence_slots(channel_id, days_ahead=days_ahead)
         empty_slots: List[datetime.datetime] = []
         for cand_dt in candidates:
-            if any(abs(cand_dt - ex) < min_gap for ex in existing_dts):
+            # 1. Respeita cadência de ~18h dos agendamentos locais
+            if any(abs(cand_dt - ex) < min_own_gap for ex in existing_local_dts):
+                continue
+            # 2. Se houver vídeo postado recentemente (< 4h) naquela conta, não agenda naquele horário
+            if any(abs(cand_dt - pub) < min_recent_post_gap for pub in recent_posted_dts):
+                continue
+            # 3. Se houver qualquer vídeo agendado (local ou no YouTube) num raio de 5h, pula para o próximo horário
+            if any(abs(cand_dt - yts) < min_sched_proximity for yts in yt_scheduled_dts):
                 continue
             empty_slots.append(cand_dt)
 
@@ -329,6 +346,20 @@ class PostScheduler:
             if step > 200:
                 break
 
+        from app.services.uploader import fetch_channel_youtube_timeline
+        yt_timeline = fetch_channel_youtube_timeline(self.db, channel)
+        local_yt_ids = {
+            p.youtube_video_id
+            for p in self.db.query(ScheduledPost)
+            .filter(ScheduledPost.destination_channel_id == channel_id)
+            .filter(ScheduledPost.youtube_video_id.isnot(None))
+            .all()
+        }
+        ext_yt_by_date: Dict[datetime.date, List[Dict[str, Any]]] = defaultdict(list)
+        for item in yt_timeline:
+            if item.get("is_scheduled") and item.get("youtube_video_id") not in local_yt_ids and item.get("datetime"):
+                ext_yt_by_date[item["datetime"].date()].append(item)
+
         matrix = []
         total_scheduled = 0
         total_slots = 0
@@ -424,6 +455,32 @@ class PostScheduler:
                         "duration": round(float(extra.clip.duration or 0), 1),
                         "media_url": f"/media/clips/{os.path.basename(extra.clip.clip_path)}" if has_mp4 else None,
                         "thumbnail_url": f"/media/thumbnails/{os.path.basename(extra.clip.thumbnail_path)}" if has_thumb else None,
+                    },
+                })
+
+            # Mostra também vídeos JÁ agendados diretamente naquela conta do YouTube!
+            for ext_yt in ext_yt_by_date.get(day_date, []):
+                total_slots += 1
+                total_scheduled += 1
+                dt_yt = ext_yt["datetime"]
+                day_slots_data.append({
+                    "time": dt_yt.strftime("%H:%M"),
+                    "datetime": dt_yt.isoformat(),
+                    "is_filled": True,
+                    "post_id": None,
+                    "status": "scheduled_on_youtube",
+                    "scheduled_for": dt_yt.isoformat(),
+                    "is_simulated": False,
+                    "is_external": True,
+                    "youtube_url": ext_yt.get("youtube_url"),
+                    "error_log": None,
+                    "clip": {
+                        "id": 0,
+                        "title": f"[YouTube] {ext_yt.get('title', 'Agendado no YouTube')}",
+                        "score": 100,
+                        "duration": 0,
+                        "media_url": None,
+                        "thumbnail_url": None,
                     },
                 })
 
