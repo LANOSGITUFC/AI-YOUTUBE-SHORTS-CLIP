@@ -188,8 +188,33 @@ class PipelineWorker:
                     db.commit()
                     self._log("info", f"{skipped_shorts} YouTube Short(s) ignorado(s) da fila.")
 
+                # Verifica se já existem cortes analisados com vídeo local em disco aguardando renderização
+                # (evita acumular dezenas de lives baixadas sem terminar os cortes da live atual e enviar ao Drive)
+                try:
+                    from app.services.drive_archiver import DriveArchiver
+                    archived_index = DriveArchiver(db)._load_index()
+                except Exception:
+                    archived_index = {}
+
+                pre_analyzed = (
+                    db.query(ClipSegment)
+                    .filter(ClipSegment.status == "analyzed")
+                    .all()
+                )
+                local_analyzed_count = sum(
+                    1 for c in pre_analyzed
+                    if c.video and c.video.video_path and os.path.isfile(c.video.video_path)
+                )
+
                 pending_video = None
-                if discovered_videos:
+                if local_analyzed_count >= 6:
+                    self._log(
+                        "info",
+                        f"{local_analyzed_count} cortes aguardando renderização local — finalizando cortes antes de baixar nova live.",
+                        stage="rendering",
+                        progress=35,
+                    )
+                elif discovered_videos:
                     processed_counts = {}
                     for v in discovered_videos:
                         if v.channel_id not in processed_counts:
@@ -236,19 +261,24 @@ class PipelineWorker:
                         self._log("error", f"Erro no vídeo {pending_video.id}: {e}")
                         logger.debug(traceback.format_exc())
 
-                # 3. Renderizar próximo clipe analisado (com arquivo fonte disponível em disco)
-                analyzed_clips = (
-                    db.query(ClipSegment)
-                    .filter(ClipSegment.status == "analyzed")
-                    .order_by(ClipSegment.virality_score.desc())
-                    .all()
-                )
-                renderable_clips = [
-                    c for c in analyzed_clips
-                    if c.video and c.video.video_path
-                ]
-                pending_clip = None
-                if renderable_clips:
+                # 3. Renderizar até 3 clipes analisados por ciclo (apenas com arquivo fonte existente em disco ou no Drive)
+                for _render_slot in range(3):
+                    analyzed_clips = (
+                        db.query(ClipSegment)
+                        .filter(ClipSegment.status == "analyzed")
+                        .order_by(ClipSegment.virality_score.desc())
+                        .all()
+                    )
+                    renderable_clips = [
+                        c for c in analyzed_clips
+                        if c.video and (
+                            (c.video.video_path and os.path.isfile(c.video.video_path))
+                            or (c.video.id in archived_index)
+                        )
+                    ]
+                    if not renderable_clips:
+                        break
+
                     rendered_counts = {}
                     for c in renderable_clips:
                         ch_id = c.video.channel_id if c.video else str(c.video_id)
@@ -264,13 +294,13 @@ class PipelineWorker:
 
                     def _clip_key(c):
                         ch_id = c.video.channel_id if c.video else str(c.video_id)
-                        return priority_key(weights, ch_id, rendered_counts.get(ch_id, 0)) + (-(c.virality_score or 0),)
+                        has_local = 0 if (c.video and c.video.video_path and os.path.isfile(c.video.video_path)) else 1
+                        return (has_local,) + priority_key(weights, ch_id, rendered_counts.get(ch_id, 0)) + (-(c.virality_score or 0),)
 
                     ranked = [c for c in renderable_clips if c.queue_rank is not None]
                     # Fila manual (arrastada no painel) tem prioridade sobre a ordem automática
                     pending_clip = min(ranked, key=lambda c: c.queue_rank) if ranked else min(renderable_clips, key=_clip_key)
 
-                if pending_clip:
                     self._state["current_clip_id"] = pending_clip.id
                     try:
                         self._log("info", f"Renderizando 9:16 clipe #{pending_clip.id}: {pending_clip.title[:50]}", stage="rendering", progress=84)
@@ -282,6 +312,7 @@ class PipelineWorker:
                     except Exception as e:
                         self._log("error", f"Erro ao renderizar clipe #{pending_clip.id}: {e}")
                         logger.debug(traceback.format_exc())
+                        break
 
                 # 4. Realocar posts vencidos e agendar clipes renderizados
                 try:
@@ -294,7 +325,7 @@ class PipelineWorker:
                 except Exception as e:
                     self._log("error", f"Erro no agendador: {e}")
 
-                # 5. Processar próximo upload pendente (pula contas em cooldown de uploadLimitExceeded)
+                # 5. Processar até 3 uploads pendentes (1 por canal disponível, pulando contas em cooldown de uploadLimitExceeded)
                 from app.services.uploader import is_channel_upload_rate_limited
                 pending_posts = (
                     db.query(ScheduledPost)
@@ -302,18 +333,23 @@ class PipelineWorker:
                     .order_by(ScheduledPost.scheduled_for.asc())
                     .all()
                 )
+                uploaded_channels_this_cycle = set()
                 for post in pending_posts:
+                    if len(uploaded_channels_this_cycle) >= 3:
+                        break
+                    if post.destination_channel_id in uploaded_channels_this_cycle:
+                        continue
                     if is_channel_upload_rate_limited(post.destination_channel_id):
                         continue
-                    if post.clip and post.clip.clip_path:
+                    if post.clip and post.clip.clip_path and os.path.isfile(post.clip.clip_path):
                         try:
                             up_res = uploader.upload_scheduled_post(post.id)
                             if up_res and up_res.get("mode") == "rate_limited":
                                 self._log("info", up_res.get("message", "Conta em limite diário do YouTube — pulando para próxima."))
                                 continue
+                            uploaded_channels_this_cycle.add(post.destination_channel_id)
                         except Exception as e:
                             self._log("error", f"Erro no upload do post #{post.id}: {e}")
-                        break
 
                 # 6. Auto-Arquivar no Google Drive (automático assim que todos os clipes da live já foram renderizados!)
                 try:
