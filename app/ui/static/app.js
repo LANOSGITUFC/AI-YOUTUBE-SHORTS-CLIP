@@ -2,6 +2,7 @@
 
 const VIEW_TITLES = {
   clips: 'Clipes 9:16',
+  moments: 'Melhores Momentos',
   queue: 'Fila & Esteira',
   calendar: 'Agenda Semanal (4/dia × 7 dias)',
   experiments: 'Laboratório 7 Dias — Testes A/B por Canal',
@@ -104,6 +105,7 @@ function switchView(view) {
 
 function refreshCurrentView() {
   if (currentView === 'clips') loadClips();
+  else if (currentView === 'moments') loadMomentsView();
   else if (currentView === 'queue') loadVideosTable();
   else if (currentView === 'calendar') loadCalendar();
   else if (currentView === 'experiments') loadExperimentsView();
@@ -139,6 +141,7 @@ function applyStatusData(data) {
   setText('navCountClips', data.clips_total ?? 0);
   setText('navCountScheduled', data.scheduled_posts ?? 0);
   setText('navCountDest', data.destination_channels ?? 0);
+  setText('navCountMoments', data.moments_suggested ?? 0);
 
   if (data.pipeline) {
     renderPipelineLive(data.pipeline);
@@ -203,7 +206,8 @@ function handleRealtimeStatusPayload(data) {
   const modalOpen = Boolean(
     document.getElementById('editPostModal')?.classList.contains('open') ||
     document.getElementById('editClipModal')?.classList.contains('open') ||
-    document.getElementById('wordsEditorModal')?.classList.contains('open')
+    document.getElementById('wordsEditorModal')?.classList.contains('open') ||
+    document.getElementById('momentModal')?.classList.contains('open')
   );
   if (lastSnapshot && lastSnapshot !== snap && !dndActive && !modalOpen) {
     refreshCurrentView();

@@ -5,6 +5,7 @@ Exemplos:
   python -m app.ai_bus.cli status
   python -m app.ai_bus.cli list-videos
   python -m app.ai_bus.cli unused-windows --video-id=VIDEO_ID
+  python -m app.ai_bus.cli moments --video-id=VIDEO_ID [--refresh]
   python -m app.ai_bus.cli propose-clip --agent=claude-code --video-id=VIDEO_ID --start=120.0 --end=175.0 --title="Momento épico"
   python -m app.ai_bus.cli send-event --agent=open-code --type="PING" --payload='{"msg":"hello"}'
 """
@@ -31,6 +32,11 @@ def main():
     # Command: unused-windows
     p_windows = subparsers.add_parser("unused-windows", help="Lista intervalos livres (não usados) de um vídeo")
     p_windows.add_argument("--video-id", required=True, help="ID do vídeo no YouTube")
+
+    # Command: moments
+    p_moments = subparsers.add_parser("moments", help="Melhores momentos do vídeo (áudio, fala, visual)")
+    p_moments.add_argument("--video-id", required=True, help="ID do vídeo")
+    p_moments.add_argument("--refresh", action="store_true", help="Recalcula em vez de ler os já gravados")
 
     # Command: propose-clip
     p_clip = subparsers.add_parser("propose-clip", help="Registra proposta de corte com validação de duplicidade")
@@ -106,6 +112,11 @@ def main():
 
         elif args.command == "unused-windows":
             res = bus.get_available_windows_for_agent(args.video_id)
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+
+        elif args.command == "moments":
+            from app.ai_bus.mcp_server import handle_call_tool
+            res = handle_call_tool("get_best_moments", {"video_id": args.video_id, "refresh": args.refresh})
             print(json.dumps(res, indent=2, ensure_ascii=False))
 
         elif args.command == "propose-clip":

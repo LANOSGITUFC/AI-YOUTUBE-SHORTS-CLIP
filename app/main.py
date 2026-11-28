@@ -22,7 +22,8 @@ from sqlalchemy.orm import Session
 
 from app.database.session import SessionLocal, init_db, get_db
 from app.database.models import (
-    SourceChannel, SourceVideo, ClipSegment, DestinationChannel, ScheduledPost, ChannelExperiment, AgentBusEvent, SystemSetting, BrandKit
+    SourceChannel, SourceVideo, ClipSegment, DestinationChannel, ScheduledPost, ChannelExperiment, AgentBusEvent, SystemSetting, BrandKit,
+    VideoMoment,
 )
 from app.services.monitor import ChannelMonitor
 from app.services.deduplicator import DeduplicationEngine
@@ -32,6 +33,7 @@ from app.services.subtitles import OPUS_CAPTION_PRESETS
 from app.services.scheduler import PostScheduler
 from app.services.experiments import ChannelExperimentEngine, get_experiment_catalog
 from app.services.priority import ranked_channels
+from app.services.moment_detector import MomentDetector, get_job_state as get_moment_job_state
 from app.services.pipeline_worker import PipelineWorker
 from app.services.render_guard import RenderBusyError
 from app.services.auth_youtube import YouTubeAuthManager, get_client_secrets_path
@@ -178,7 +180,11 @@ def get_system_status(db: Session = Depends(get_db)):
         views_total = sum(int(p[0] or 0) for p in db.query(ScheduledPost.views_count).all())
     except Exception:
         views_total = 0
-    state_hash = f"{dest_sig}#{experiments_count}#{views_total}"
+    try:
+        moments_suggested = db.query(VideoMoment).filter(VideoMoment.status == "suggested").count()
+    except Exception:
+        moments_suggested = 0
+    state_hash = f"{dest_sig}#{experiments_count}#{views_total}#{moments_suggested}"
 
     return {
         "status": "online",
@@ -192,6 +198,7 @@ def get_system_status(db: Session = Depends(get_db)):
         "destination_channels": dest_count,
         "active_destination_channels": active_dest_count,
         "experiments_count": experiments_count,
+        "moments_suggested": moments_suggested,
         "state_hash": state_hash,
         "deduplication_engine": "ACTIVE",
         "pipeline": worker.get_live_state(),
@@ -671,6 +678,240 @@ def get_video_dedup_timeline(video_id: str, db: Session = Depends(get_db)):
         "used_segments": used,
         "available_unused_windows": windows,
     }
+
+
+# ==========================================
+# MELHORES MOMENTOS (detecção multimodal: áudio, fala, visual)
+# ==========================================
+
+VALID_MOMENT_VISUAL_MODES = {"auto", "full", "keyframes", "off"}
+
+
+def _moments_settings(db: Session) -> Dict[str, Any]:
+    auto = _get_setting_val(db, "MOMENTS_AUTO_CLIP", "true").strip().lower() not in ("false", "0", "no", "nao", "off")
+    visual = _get_setting_val(db, "MOMENTS_VISUAL_MODE", "auto").strip().lower() or "auto"
+    return {"auto_clip": auto, "visual_mode": visual if visual in VALID_MOMENT_VISUAL_MODES else "auto"}
+
+
+def _run_moment_detection(video_id: str, force: bool):
+    with SessionLocal() as bg_db:
+        try:
+            MomentDetector(bg_db).detect(video_id, force=force)
+        except Exception as exc:
+            print(f"[moments] Falha ao detectar momentos de {video_id}: {exc}")
+
+
+@app.get("/api/moments/settings")
+def get_moments_settings(db: Session = Depends(get_db)):
+    return _moments_settings(db)
+
+
+@app.put("/api/moments/settings")
+def update_moments_settings(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    if "auto_clip" in payload:
+        _upsert_setting(db, "MOMENTS_AUTO_CLIP", "true" if bool(payload["auto_clip"]) else "false",
+                        "Esteira 24/7 transforma os melhores momentos em clipes sozinha (false = só sugere)")
+    if "visual_mode" in payload:
+        mode = str(payload["visual_mode"] or "auto").strip().lower()
+        if mode not in VALID_MOMENT_VISUAL_MODES:
+            raise HTTPException(status_code=400, detail="visual_mode inválido (auto, full, keyframes, off).")
+        _upsert_setting(db, "MOMENTS_VISUAL_MODE", mode, "Análise visual dos melhores momentos")
+    db.commit()
+    return {"success": True, **_moments_settings(db)}
+
+
+@app.get("/api/moments")
+def list_moments(
+    video_id: Optional[str] = None,
+    status: Optional[str] = Query(None, description="suggested, accepted, dismissed, covered"),
+    kind: Optional[str] = Query(None, description="audio, speech, visual, mixed"),
+    limit: int = Query(200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+):
+    q = db.query(VideoMoment)
+    if video_id:
+        q = q.filter(VideoMoment.video_id == video_id)
+    if kind:
+        q = q.filter(VideoMoment.kind == kind)
+    rows = q.order_by(VideoMoment.score.desc(), VideoMoment.start_time.asc()).limit(limit * 3 if status else limit).all()
+    det = MomentDetector(db)
+    used_cache: Dict[str, Any] = {}
+    out = []
+    for m in rows:
+        if m.video_id not in used_cache:
+            used_cache[m.video_id] = det.used_ranges(m.video_id)
+        item = det.serialize(m, used_cache[m.video_id])
+        if status and item["status"] != status:
+            continue
+        out.append(item)
+        if len(out) >= limit:
+            break
+    return {"moments": out, "settings": _moments_settings(db)}
+
+
+@app.get("/api/moments/videos")
+def list_videos_with_moments(db: Session = Depends(get_db)):
+    """Vídeos que podem ter momentos detectados (baixados ou transcritos), com contagem de sugestões."""
+    videos = (
+        db.query(SourceVideo)
+        .filter(
+            (SourceVideo.video_path.isnot(None))
+            | (SourceVideo.audio_path.isnot(None))
+            | (SourceVideo.transcript_path.isnot(None))
+        )
+        .order_by(SourceVideo.created_at.desc())
+        .limit(300)
+        .all()
+    )
+    out = []
+    for v in videos:
+        counts = {"suggested": 0, "accepted": 0, "dismissed": 0}
+        for m in v.moments:
+            counts[m.status] = counts.get(m.status, 0) + 1
+        out.append({
+            "id": v.id,
+            "title": v.title,
+            "channel_name": v.channel.name if v.channel else "Importado",
+            "duration": round(float(v.duration_seconds or 0), 1),
+            "status": v.status,
+            "has_local_video": bool(v.video_path and os.path.exists(v.video_path)),
+            "moments": counts,
+            "job": get_moment_job_state(v.id),
+        })
+    return out
+
+
+@app.get("/api/videos/{video_id}/moments")
+def get_video_moments(video_id: str, db: Session = Depends(get_db)):
+    video = db.query(SourceVideo).filter(SourceVideo.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Vídeo não encontrado")
+    det = MomentDetector(db)
+    used = det.used_ranges(video_id)
+    rows = (
+        db.query(VideoMoment)
+        .filter(VideoMoment.video_id == video_id)
+        .order_by(VideoMoment.score.desc(), VideoMoment.start_time.asc())
+        .all()
+    )
+    curves = det.load_curves(video_id)
+    duration = float(video.duration_seconds or 0.0) or float((curves or {}).get("duration") or 0.0)
+    has_source = bool(video.video_path and os.path.exists(video.video_path))
+    return {
+        "video_id": video.id,
+        "title": video.title,
+        "duration": duration,
+        "has_source_video": has_source,
+        "source_stream_url": f"/api/videos/{video.id}/stream" if has_source else None,
+        "can_detect": bool(
+            (video.video_path and os.path.exists(video.video_path))
+            or (video.audio_path and os.path.exists(video.audio_path))
+            or (video.transcript_path and os.path.exists(video.transcript_path))
+        ),
+        "job": get_moment_job_state(video.id),
+        "curves": curves,
+        "used_segments": [{"start": round(a, 1), "end": round(b, 1)} for a, b in used],
+        "moments": [det.serialize(m, used) for m in rows],
+        "settings": _moments_settings(db),
+    }
+
+
+@app.post("/api/videos/{video_id}/moments/detect")
+def detect_video_moments(video_id: str, payload: Optional[Dict[str, Any]] = None, db: Session = Depends(get_db)):
+    video = db.query(SourceVideo).filter(SourceVideo.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Vídeo não encontrado")
+    has_input = any(
+        p and os.path.exists(p) for p in (video.video_path, video.audio_path, video.transcript_path)
+    )
+    if not has_input:
+        raise HTTPException(
+            status_code=400,
+            detail="Esse vídeo ainda não foi baixado nem transcrito. Clique em Processar na Fila primeiro.",
+        )
+    job = get_moment_job_state(video_id)
+    if job.get("state") == "running":
+        return {"success": True, "running": True, "job": job, "message": "A detecção já está em andamento."}
+    force = bool((payload or {}).get("force", False))
+    threading.Thread(target=_run_moment_detection, args=(video_id, force), daemon=True).start()
+    return {"success": True, "running": True, "job": {"state": "running", "message": "Iniciando análise..."}}
+
+
+@app.post("/api/moments/{moment_id}/accept")
+def accept_moment(moment_id: int, payload: Optional[Dict[str, Any]] = None, db: Session = Depends(get_db)):
+    payload = payload or {}
+    overrides: Dict[str, Any] = {}
+    for key in ("start_time", "end_time"):
+        if payload.get(key) is not None:
+            try:
+                overrides[key] = float(payload[key])
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"'{key}' deve ser numérico.")
+    if payload.get("title"):
+        overrides["title"] = str(payload["title"])
+    if payload.get("crop_mode"):
+        if payload["crop_mode"] not in VALID_CROP_MODES:
+            raise HTTPException(status_code=400, detail="crop_mode inválido.")
+        overrides["crop_mode"] = payload["crop_mode"]
+    try:
+        clip = MomentDetector(db).accept(moment_id, overrides, agent="moments")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"success": True, "clip_id": clip.id, "message": f"Momento virou o clipe #{clip.id}."}
+
+
+@app.post("/api/moments/accept-batch")
+def accept_moments_batch(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    ids = payload.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="Envie 'ids' com pelo menos um momento.")
+    det = MomentDetector(db)
+    created, failed = [], []
+    # Do maior score para o menor: se dois colidirem, fica o melhor
+    rows = db.query(VideoMoment).filter(VideoMoment.id.in_([int(i) for i in ids])).order_by(VideoMoment.score.desc()).all()
+    for m in rows:
+        try:
+            clip = det.accept(m.id, agent="moments")
+            created.append({"moment_id": m.id, "clip_id": clip.id})
+        except (LookupError, ValueError) as exc:
+            db.rollback()
+            failed.append({"moment_id": m.id, "error": str(exc)})
+    return {"success": True, "created": created, "failed": failed}
+
+
+@app.post("/api/moments/{moment_id}/dismiss")
+def dismiss_moment(moment_id: int, db: Session = Depends(get_db)):
+    m = db.query(VideoMoment).filter(VideoMoment.id == moment_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Momento não encontrado.")
+    m.status = "dismissed"
+    db.commit()
+    return {"success": True}
+
+
+@app.post("/api/moments/{moment_id}/restore")
+def restore_moment(moment_id: int, db: Session = Depends(get_db)):
+    m = db.query(VideoMoment).filter(VideoMoment.id == moment_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Momento não encontrado.")
+    if m.status == "dismissed":
+        m.status = "suggested"
+        db.commit()
+    return {"success": True}
+
+
+@app.post("/api/videos/{video_id}/moments/dismiss-rest")
+def dismiss_remaining_moments(video_id: str, db: Session = Depends(get_db)):
+    n = (
+        db.query(VideoMoment)
+        .filter(VideoMoment.video_id == video_id)
+        .filter(VideoMoment.status == "suggested")
+        .update({VideoMoment.status: "dismissed"}, synchronize_session=False)
+    )
+    db.commit()
+    return {"success": True, "dismissed": n}
 
 
 # ==========================================
@@ -1847,7 +2088,7 @@ def update_settings(payload: Dict[str, Any], db: Session = Depends(get_db)):
 
     allowed_simple = {
         "AI_PROVIDER", "WHISPER_MODEL", "CROP_MODE", "MAX_CLIP_DURATION", "MIN_CLIP_DURATION",
-        "AUTO_SCHEDULE", "TIMEZONE", "YT_COOKIES_BROWSER",
+        "AUTO_SCHEDULE", "TIMEZONE", "YT_COOKIES_BROWSER", "MOMENTS_AUTO_CLIP", "MOMENTS_VISUAL_MODE",
         "GEMINI_MODEL", "GROQ_MODEL", "OPENAI_MODEL", "CLAUDE_MODEL", "OLLAMA_URL", "OLLAMA_MODEL",
     }
 

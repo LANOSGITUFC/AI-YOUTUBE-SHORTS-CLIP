@@ -23,6 +23,7 @@ data/transcripts/*
 !data/transcripts/.gitkeep
 data/thumbnails/*
 !data/thumbnails/.gitkeep
+data/moments/*
 *.db
 *.sqlite3
 

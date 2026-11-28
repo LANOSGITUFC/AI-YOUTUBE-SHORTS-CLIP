@@ -62,6 +62,18 @@ TOOLS_DEFINITION = [
         }
     },
     {
+        "name": "get_best_moments",
+        "description": "Detecta (ou lê do cache) os melhores momentos de um vídeo por picos de áudio, fala e mudanças visuais. Retorna início/fim, score, tipo e motivos. Use antes de propose_clip.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "video_id": {"type": "string", "description": "ID do vídeo"},
+                "refresh": {"type": "boolean", "description": "Recalcula os momentos (padrão: usa os já gravados se existirem)"}
+            },
+            "required": ["video_id"]
+        }
+    },
+    {
         "name": "get_schedule_matrix",
         "description": "Retorna o calendário de agendamento de postagens (4 vídeos por dia para os próximos 7 dias).",
         "inputSchema": {
@@ -160,6 +172,23 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Any:
                 "clip_id": seg.id,
                 "message": f"Clipe '{title}' registrado com sucesso e garantido contra reutilização futura!"
             }
+
+        elif name == "get_best_moments":
+            from app.database.models import VideoMoment
+            from app.services.moment_detector import MomentDetector
+            video_id = arguments["video_id"]
+            det = MomentDetector(db)
+            has_rows = db.query(VideoMoment).filter(VideoMoment.video_id == video_id).count() > 0
+            if arguments.get("refresh") or not has_rows:
+                det.detect(video_id)
+            used = det.used_ranges(video_id)
+            rows = (
+                db.query(VideoMoment)
+                .filter(VideoMoment.video_id == video_id)
+                .order_by(VideoMoment.score.desc())
+                .all()
+            )
+            return [det.serialize(m, used) for m in rows]
 
         elif name == "get_schedule_matrix":
             posts = (

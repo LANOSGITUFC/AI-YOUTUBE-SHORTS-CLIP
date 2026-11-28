@@ -21,7 +21,7 @@ from app.services.editor import VideoEditor
 from app.services.render_guard import RenderBusyError
 from app.services.scheduler import PostScheduler
 from app.services.uploader import YouTubeUploader
-from app.database.models import SourceVideo, ClipSegment, ScheduledPost, SystemSetting
+from app.database.models import SourceVideo, ClipSegment, ScheduledPost, SystemSetting, VideoMoment
 from app.services.priority import get_priority_weights, priority_key
 
 logging.basicConfig(level=logging.INFO)
@@ -95,7 +95,7 @@ class PipelineWorker:
                 self._log("info", f"Extraindo legendas/transcrição: {video.id}", stage="transcribing", progress=45)
                 transcriber.transcribe_video(video.id)
 
-                self._log("info", f"Analisando momentos virais (3 a 7 cortes): {video.id}", stage="analyzing", progress=65)
+                self._log("info", f"Detectando melhores momentos (áudio, fala, visual): {video.id}", stage="analyzing", progress=65)
                 clips = analyzer.analyze_video(video.id, max_clips=7, min_clips=3)
                 self._log("success", f"{len(clips)} cortes inéditos identificados em {video.id}", stage="analyzing", progress=75)
 
@@ -228,7 +228,7 @@ class PipelineWorker:
                             transcriber.transcribe_video(pending_video.id)
                             results["transcriptions"] += 1
 
-                            self._log("info", f"Detectando máximo de cortes inéditos em {pending_video.id}...", stage="analyzing", progress=68)
+                            self._log("info", f"Detectando melhores momentos (áudio, fala, visual) em {pending_video.id}...", stage="analyzing", progress=68)
                             clips = analyzer.analyze_video(pending_video.id, max_clips=20, min_clips=3)
                             results["clips_generated"] += len(clips)
                             self._log("success", f"{len(clips)} cortes criados para {pending_video.title[:45]}", stage="analyzing", progress=74)
@@ -324,6 +324,8 @@ class PipelineWorker:
                         archiver = DriveArchiver(db)
                         st = archiver.get_storage_status()
                         if st.get("gdrive_oauth_connected") or (st.get("rclone_remote") and st.get("rclone_available")):
+                            moments_row = db.query(SystemSetting).filter(SystemSetting.key == "MOMENTS_AUTO_CLIP").first()
+                            moments_auto = (not moments_row) or (str(moments_row.value or "true").strip().lower() not in ("false", "0", "no", "nao", "off"))
                             processed_vids = (
                                 db.query(SourceVideo)
                                 .filter(SourceVideo.status == "processed")
@@ -342,6 +344,15 @@ class PipelineWorker:
                                 )
                                 if pending_clips_cnt > 0:
                                     continue  # Ainda tem clipes dessa live aguardando renderização
+                                if not moments_auto:
+                                    pending_moments = (
+                                        db.query(VideoMoment)
+                                        .filter(VideoMoment.video_id == pv.id)
+                                        .filter(VideoMoment.status == "suggested")
+                                        .count()
+                                    )
+                                    if pending_moments > 0:
+                                        continue  # Modo manual: espera o usuário escolher os melhores momentos
                                 self._log("info", f"Arquivando live no Google Drive: {pv.title[:50]}", stage="archiving", progress=98)
                                 arc_res = archiver.archive_video(pv.id, delete_local_after=True)
                                 results["archived_drive"] = results.get("archived_drive", 0) + 1
