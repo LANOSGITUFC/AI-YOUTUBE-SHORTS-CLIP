@@ -1640,7 +1640,6 @@ def gdrive_oauth_login():
     )
     auth_url, _ = flow.authorization_url(
         access_type="offline",
-        include_granted_scopes="true",
         prompt="consent",
         state="gdrive_archiver",
     )
