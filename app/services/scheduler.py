@@ -113,6 +113,40 @@ class PostScheduler:
                 break
         return slots
 
+    def _get_active_experiment_slots(self, channel_id: int) -> List[Dict[str, Any]]:
+        """Retorna todos os horários (preenchidos ou reservados) de experimentos ativos neste canal."""
+        from app.database.models import ChannelExperiment
+        out: List[Dict[str, Any]] = []
+        active_exps = (
+            self.db.query(ChannelExperiment)
+            .filter(ChannelExperiment.destination_channel_id == channel_id)
+            .filter(ChannelExperiment.status == "active")
+            .all()
+        )
+        for exp in active_exps:
+            try:
+                plan = json.loads(exp.plan_json or "[]")
+            except Exception:
+                plan = []
+            if not isinstance(plan, list):
+                continue
+            for slot in plan:
+                raw_dt = slot.get("scheduled_for")
+                if not raw_dt:
+                    continue
+                try:
+                    dt_val = datetime.datetime.fromisoformat(str(raw_dt))
+                except Exception:
+                    continue
+                out.append({
+                    "datetime": dt_val,
+                    "experiment_id": exp.id,
+                    "experiment_name": exp.name,
+                    "post_id": slot.get("post_id"),
+                    "slot": slot,
+                })
+        return out
+
     def get_upcoming_empty_slots(
         self,
         channel_id: int,
@@ -138,6 +172,10 @@ class PostScheduler:
         existing_local_dts = [p.scheduled_for for p in local_posts if p.scheduled_for]
         recent_posted_dts = [p.published_at or p.scheduled_for for p in local_posts if p.status == "published" and (p.published_at or p.scheduled_for)]
 
+        # Reconhece também horários reservados em experimentos ativos (Lab 7 Dias) para evitar qualquer colisão
+        exp_slots = self._get_active_experiment_slots(channel_id)
+        exp_reserved_dts = [s["datetime"] for s in exp_slots if s.get("datetime")]
+
         # Reconhece vídeos postados recentemente (< 4h) e vídeos JÁ agendados diretamente naquela conta do YouTube
         yt_timeline = fetch_channel_youtube_timeline(self.db, channel)
         yt_scheduled_dts = [it["datetime"] for it in yt_timeline if it.get("is_scheduled") and it.get("datetime")]
@@ -153,8 +191,10 @@ class PostScheduler:
             # 2. Se houver vídeo postado recentemente (< 4h) naquela conta, não agenda naquele horário
             if any(abs(cand_dt - pub) < min_recent_post_gap for pub in recent_posted_dts):
                 continue
-            # 3. Se houver qualquer vídeo agendado (local ou no YouTube) num raio de 5h, pula para o próximo horário
+            # 3. Se houver qualquer vídeo agendado (local, YouTube ou Lab de Teste) num raio de 5h, pula para o próximo horário
             if any(abs(cand_dt - yts) < min_sched_proximity for yts in yt_scheduled_dts):
+                continue
+            if any(abs(cand_dt - ex_dt) < min_sched_proximity for ex_dt in exp_reserved_dts):
                 continue
             empty_slots.append(cand_dt)
 
@@ -369,6 +409,12 @@ class PostScheduler:
             if item.get("is_scheduled") and item.get("youtube_video_id") not in local_yt_ids and item.get("datetime"):
                 ext_yt_by_date[item["datetime"].date()].append(item)
 
+        # Carrega também slots RESERVADOS (ainda sem post_id) de testes ativos (Lab 7 Dias) neste canal
+        exp_reserved_by_date: Dict[datetime.date, List[Dict[str, Any]]] = defaultdict(list)
+        for es in self._get_active_experiment_slots(channel_id):
+            if not es.get("post_id") and es.get("datetime"):
+                exp_reserved_by_date[es["datetime"].date()].append(es)
+
         matrix = []
         total_scheduled = 0
         total_slots = 0
@@ -414,6 +460,8 @@ class PostScheduler:
                         "status": matched_post.status,
                         "scheduled_for": matched_post.scheduled_for.isoformat(),
                         "is_simulated": bool(matched_post.youtube_video_id and matched_post.youtube_video_id.startswith("yt_sim_")),
+                        "is_experiment": bool(matched_post.experiment_id),
+                        "experiment_id": matched_post.experiment_id,
                         "youtube_url": matched_post.youtube_url,
                         "error_log": matched_post.error_log,
                         "clip": {
@@ -439,7 +487,7 @@ class PostScheduler:
 
                 day_slots_data.append(slot_info)
 
-            # Inclui posts extras movidos manualmente para este dia fora do slot padrão
+            # Inclui posts extras (movidos manualmente OU agendados pelo Lab de Testes em horários próprios)
             for extra in day_posts:
                 if extra.id in used_post_ids or not extra.clip:
                     continue
@@ -455,6 +503,8 @@ class PostScheduler:
                     "status": extra.status,
                     "scheduled_for": extra.scheduled_for.isoformat(),
                     "is_simulated": bool(extra.youtube_video_id and extra.youtube_video_id.startswith("yt_sim_")),
+                    "is_experiment": bool(extra.experiment_id),
+                    "experiment_id": extra.experiment_id,
                     "youtube_url": extra.youtube_url,
                     "error_log": extra.error_log,
                     "clip": {
@@ -464,6 +514,36 @@ class PostScheduler:
                         "duration": round(float(extra.clip.duration or 0), 1),
                         "media_url": f"/media/clips/{os.path.basename(extra.clip.clip_path)}" if has_mp4 else None,
                         "thumbnail_url": f"/media/thumbnails/{os.path.basename(extra.clip.thumbnail_path)}" if has_thumb else None,
+                    },
+                })
+
+            # Inclui slots RESERVADOS (ainda sem vídeo) de testes ativos (Lab) para transparência total na agenda
+            for res_exp in exp_reserved_by_date.get(day_date, []):
+                dt_res = res_exp["datetime"]
+                slot_meta = res_exp.get("slot") or {}
+                total_slots += 1
+                total_scheduled += 1
+                day_slots_data.append({
+                    "time": dt_res.strftime("%H:%M"),
+                    "datetime": dt_res.isoformat(),
+                    "is_filled": True,
+                    "post_id": None,
+                    "status": "experiment_reserved",
+                    "scheduled_for": dt_res.isoformat(),
+                    "is_simulated": False,
+                    "is_external": False,
+                    "is_experiment": True,
+                    "is_experiment_reserved": True,
+                    "experiment_id": res_exp["experiment_id"],
+                    "youtube_url": None,
+                    "error_log": None,
+                    "clip": {
+                        "id": 0,
+                        "title": f"[Lab] Dia {slot_meta.get('day_index', '?')} · {slot_meta.get('edit_style_label', 'Teste A/B')}",
+                        "score": 0,
+                        "duration": 0,
+                        "media_url": None,
+                        "thumbnail_url": None,
                     },
                 })
 

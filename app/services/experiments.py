@@ -240,15 +240,16 @@ class ChannelExperimentEngine:
         posts_per_day: int = 4,
         start_dt: Optional[datetime.datetime] = None,
         seed_offset: int = 0,
+        start_date: Optional[datetime.date] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Gera uma matriz balanceada (estilo quadrado latino) para N dias x M posts/dia,
-        SEMPRE iniciando no próximo dia útil (segunda a sexta) a partir das 07:30.
+        Gera uma matriz balanceada (estilo quadrado latino) para N dias (1 a 30) x M posts/dia.
+        Se start_date for informado, começa nesse dia; caso contrário, inicia no próximo dia útil às 07:30.
         """
-        days = max(1, min(14, int(days or 7)))
+        days = max(1, min(30, int(days or 7)))
         posts_per_day = max(1, min(6, int(posts_per_day or 4)))
         base_now = start_dt or datetime.datetime.now()
-        first_day = _next_business_day(base_now.date())
+        first_day = start_date if start_date is not None else _next_business_day(base_now.date())
 
         slots: List[Dict[str, Any]] = []
         slot_seq = 0
@@ -486,10 +487,14 @@ class ChannelExperimentEngine:
         apply_variants: bool = True,
         include_analyzed: bool = False,
         seed_offset: int = 0,
+        start_date: Optional[datetime.date] = None,
     ) -> ChannelExperiment:
         channel = self.db.query(DestinationChannel).filter(DestinationChannel.id == channel_id).first()
         if not channel:
             raise ValueError(f"Canal de destino #{channel_id} não encontrado.")
+
+        days = max(1, min(30, int(days or 7)))
+        posts_per_day = max(1, min(6, int(posts_per_day or 4)))
 
         # Pausa experimentos anteriores ativos no mesmo canal
         prev_active = (
@@ -502,22 +507,25 @@ class ChannelExperimentEngine:
             prev.status = "completed"
 
         now = datetime.datetime.now()
+        first_day = start_date if start_date is not None else _next_business_day(now.date())
         plan = self.build_7day_plan(
             channel_id=channel_id,
             days=days,
             posts_per_day=posts_per_day,
             start_dt=now,
             seed_offset=seed_offset,
+            start_date=first_day,
         )
 
+        exp_start_dt = datetime.datetime.combine(first_day, datetime.time(7, 30))
         exp = ChannelExperiment(
             destination_channel_id=channel_id,
-            name=name or f"Semana de Teste ({days}d) — {channel.name}",
+            name=name or f"Teste ({days}d · {first_day.strftime('%d/%m')}) — {channel.name}",
             status="active",
             days=days,
             posts_per_day=posts_per_day,
-            start_date=now,
-            end_date=now + datetime.timedelta(days=days),
+            start_date=exp_start_dt,
+            end_date=exp_start_dt + datetime.timedelta(days=days),
             plan_json=json.dumps(plan, ensure_ascii=False),
         )
         self.db.add(exp)
@@ -537,6 +545,7 @@ class ChannelExperimentEngine:
         auto_fill: bool = True,
         apply_variants: bool = True,
         include_analyzed: bool = False,
+        start_date: Optional[datetime.date] = None,
     ) -> List[ChannelExperiment]:
         channels = (
             self.db.query(DestinationChannel)
@@ -554,6 +563,7 @@ class ChannelExperimentEngine:
                 apply_variants=apply_variants,
                 include_analyzed=include_analyzed,
                 seed_offset=idx * 2,
+                start_date=start_date,
             )
             created.append(exp)
         return created

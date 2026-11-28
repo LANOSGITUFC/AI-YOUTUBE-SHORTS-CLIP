@@ -807,21 +807,28 @@ async function loadCalendar() {
         </div>
         <div class="cal-slots">
           ${day.slots.map((s) => {
-            const isExternal = Boolean(s.is_external || (s.is_filled && !s.post_id));
-            const stLabel = s.is_simulated ? 'SIMULADO'
+            const isExpReserved = Boolean(s.is_experiment_reserved || s.status === 'experiment_reserved');
+            const isExternal = Boolean(!isExpReserved && (s.is_external || (s.is_filled && !s.post_id)));
+            const isExpPost = Boolean(s.is_experiment && !isExpReserved);
+            const baseLabel = s.is_simulated ? 'SIMULADO'
+              : isExpReserved ? 'LAB RESERVADO'
               : isExternal ? 'YT EXTERNO'
               : s.status === 'scheduled_on_youtube' ? 'NO YOUTUBE'
               : s.status === 'awaiting_oauth' ? 'SEM OAUTH'
               : s.status === 'pending' ? 'AGENDADO'
               : s.status === 'failed' ? 'ERRO'
               : 'VAGO';
-            const movable = s.is_filled && !isExternal && (EDITABLE_POST_STATUSES.includes(s.status) || s.is_simulated);
-            const stCls = s.status === 'scheduled_on_youtube' ? 'badge-ok'
+            const stLabel = isExpPost ? `LAB · ${baseLabel}` : baseLabel;
+            const movable = s.is_filled && !isExternal && !isExpReserved && (EDITABLE_POST_STATUSES.includes(s.status) || s.is_simulated);
+            const stCls = isExpReserved ? 'badge-warn'
+              : s.status === 'scheduled_on_youtube' ? 'badge-ok'
               : s.status === 'awaiting_oauth' ? 'badge-warn'
               : s.status === 'failed' ? 'badge-err'
               : s.is_filled ? 'badge-info' : '';
             const safeYtUrl = s.youtube_url ? esc(s.youtube_url) : '';
             const clickAttr = !s.is_filled ? ''
+              : isExpReserved
+                ? `onclick="switchView('experiments')" title="Horário reservado no Lab de Testes — clique para abrir o Lab"`
               : isExternal
                 ? (safeYtUrl
                     ? `onclick="window.open('${safeYtUrl}', '_blank', 'noopener')" title="Vídeo agendado diretamente no YouTube — clique para abrir"`
@@ -839,10 +846,12 @@ async function loadCalendar() {
                 ${s.is_filled && s.clip ? `
                   <div class="cal-slot-title" title="${esc(s.clip.title)}">${esc(s.clip.title)}</div>
                   <div class="cal-slot-foot">
-                    ${isExternal
-                      ? `<span>YouTube Studio</span>${safeYtUrl ? `<a class="btn btn-ghost btn-sm" style="height:20px; padding:0 5px; font-size:10.5px; text-decoration:none;" href="${safeYtUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Abrir ↗</a>` : ''}`
-                      : `<span>${esc(s.clip.duration)}s · S${esc(s.clip.score)}</span>
-                         <button class="btn btn-ghost btn-sm" style="height:20px; padding:0 5px; font-size:10.5px;" onclick="event.stopPropagation(); removeScheduledPost(${Number(s.post_id)})">Remover</button>`
+                    ${isExpReserved
+                      ? `<span>Lab de Testes</span><button class="btn btn-ghost btn-sm" style="height:20px; padding:0 5px; font-size:10.5px;" onclick="event.stopPropagation(); switchView('experiments')">Abrir Lab</button>`
+                      : isExternal
+                        ? `<span>YouTube Studio</span>${safeYtUrl ? `<a class="btn btn-ghost btn-sm" style="height:20px; padding:0 5px; font-size:10.5px; text-decoration:none;" href="${safeYtUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Abrir ↗</a>` : ''}`
+                        : `<span>${esc(s.clip.duration)}s · S${esc(s.clip.score)}</span>
+                           <button class="btn btn-ghost btn-sm" style="height:20px; padding:0 5px; font-size:10.5px;" onclick="event.stopPropagation(); removeScheduledPost(${Number(s.post_id)})">Remover</button>`
                     }
                   </div>
                 ` : '<div style="font-size:11px; color:var(--text-muted);">Horário disponível</div>'}
@@ -2254,6 +2263,11 @@ async function loadExperimentsView() {
       sel.value = hasPrev ? prev : 'all';
     }
 
+    const startEl = document.getElementById('expStartDate');
+    if (startEl && !startEl.value) {
+      startEl.value = _nextBusinessDayIso();
+    }
+
     const listEl = document.getElementById('experimentsCardsList');
     if (!listEl) return;
 
@@ -2297,9 +2311,24 @@ async function loadExperimentsView() {
   }
 }
 
+function _nextBusinessDayIso() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  while (d.getDay() === 0 || d.getDay() === 6) {
+    d.setDate(d.getDate() + 1);
+  }
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 async function launchWeeklyExperiment() {
   const chVal = document.getElementById('expTargetChannel')?.value || 'all';
   const postsPerDay = Number(document.getElementById('expPostsPerDay')?.value || 4);
+  const durationDays = Number(document.getElementById('expDurationDays')?.value || 7);
+  const startDateInput = document.getElementById('expStartDate');
+  const startDate = (startDateInput?.value || '').trim() || _nextBusinessDayIso();
   const btn = document.getElementById('btnLaunchExperiment');
   if (btn) { btn.disabled = true; btn.textContent = 'Gerando matriz...'; }
   try {
@@ -2308,26 +2337,27 @@ async function launchWeeklyExperiment() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         channel_id: chVal === 'all' ? 'all' : Number(chVal),
-        days: 7,
+        days: durationDays,
+        start_date: startDate,
         posts_per_day: postsPerDay,
         auto_fill: true,
         apply_variants: true,
-        include_analyzed: false,
+        include_analyzed: true,
       }),
     });
     const data = await res.json();
     if (!res.ok) {
-      showToast(data.detail || 'Erro ao iniciar semana de teste.', 'error');
+      showToast(data.detail || 'Erro ao iniciar teste.', 'error');
       return;
     }
     const first = data.experiments?.[0];
     if (first?.id) activeExperimentId = first.id;
-    showToast(`Semana de teste iniciada em ${data.count} canal(is)!`, 'success');
+    showToast(`Teste de ${durationDays} dia(s) iniciado a partir de ${startDate} em ${data.count} canal(is)!`, 'success');
     await loadExperimentsView();
   } catch (e) {
     showToast('Erro de rede ao lançar experimento.', 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Rodar semana de teste (7 dias)'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Iniciar Teste'; }
   }
 }
 

@@ -404,16 +404,26 @@
               <p class="section-desc">Roda 1 semana completa de variações controladas em cada canal: horários, estilos de edição, ângulos de SEO, cenas/layouts e duração dos cortes.</p>
             </div>
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-              <select id="expTargetChannel" class="select" style="width:210px;">
+              <select id="expTargetChannel" class="select" style="width:200px;">
                 <option value="all">Todos os canais ativos</option>
               </select>
-              <select id="expPostsPerDay" class="select" style="width:130px;">
+              <input type="date" id="expStartDate" class="input" style="width:148px; height:34px;" title="Dia de início do teste (padrão: próximo dia útil)">
+              <select id="expDurationDays" class="select" style="width:112px;" title="Duração do teste em dias">
+                <option value="3">3 dias</option>
+                <option value="5">5 dias</option>
+                <option value="7" selected>7 dias</option>
+                <option value="10">10 dias</option>
+                <option value="14">14 dias</option>
+                <option value="21">21 dias</option>
+                <option value="30">30 dias</option>
+              </select>
+              <select id="expPostsPerDay" class="select" style="width:126px;">
                 <option value="3">3 vídeos/dia</option>
                 <option value="4" selected>4 vídeos/dia</option>
                 <option value="6">6 vídeos/dia</option>
               </select>
               <button class="btn btn-primary btn-sm" id="btnLaunchExperiment" onclick="launchWeeklyExperiment()">
-                Rodar semana de teste (7 dias)
+                Iniciar Teste
               </button>
             </div>
           </div>

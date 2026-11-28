@@ -2271,16 +2271,24 @@ def list_experiments(db: Session = Depends(get_db)):
 @app.post("/api/experiments/launch")
 def launch_weekly_experiment(payload: Dict[str, Any], db: Session = Depends(get_db)):
     """
-    Inicia 1 semana (7 dias) de testes com variações de horários, edição, SEO, cena e duração.
+    Inicia um ciclo de testes (1 a 30 dias, data de início configurável) com variações de horários, edição, SEO, cena e duração.
     Se channel_id for omitido ou 'all', inicia em TODOS os canais de destino ativos.
     """
     engine = ChannelExperimentEngine(db)
-    days = int(payload.get("days", 7) or 7)
-    posts_per_day = int(payload.get("posts_per_day", 4) or 4)
+    days = max(1, min(30, int(payload.get("days", 7) or 7)))
+    posts_per_day = max(1, min(6, int(payload.get("posts_per_day", 4) or 4)))
     auto_fill = bool(payload.get("auto_fill", True))
     apply_variants = bool(payload.get("apply_variants", True))
     include_analyzed = bool(payload.get("include_analyzed", False))
     channel_id = payload.get("channel_id")
+
+    parsed_start_date = None
+    raw_start = (payload.get("start_date") or "").strip()
+    if raw_start:
+        try:
+            parsed_start_date = datetime.date.fromisoformat(raw_start[:10])
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Data de início inválida. Use o formato AAAA-MM-DD.")
 
     try:
         if channel_id in (None, "", "all", 0):
@@ -2290,6 +2298,7 @@ def launch_weekly_experiment(payload: Dict[str, Any], db: Session = Depends(get_
                 auto_fill=auto_fill,
                 apply_variants=apply_variants,
                 include_analyzed=include_analyzed,
+                start_date=parsed_start_date,
             )
             return {
                 "status": "launched",
@@ -2305,6 +2314,7 @@ def launch_weekly_experiment(payload: Dict[str, Any], db: Session = Depends(get_
                 auto_fill=auto_fill,
                 apply_variants=apply_variants,
                 include_analyzed=include_analyzed,
+                start_date=parsed_start_date,
             )
             return {
                 "status": "launched",
