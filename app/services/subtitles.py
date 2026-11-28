@@ -210,7 +210,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         header = self._build_header(style)
         mode = style.get("style_mode", "word_highlight")
-        words_per_line = max(1, min(6, int(style.get("words_per_line", 3))))
+        words_per_line = 1 if mode == "single_word" else max(1, min(6, int(style.get("words_per_line", 3))))
         uppercase = bool(style.get("uppercase", True))
 
         primary_tag = f"\\c{hex_to_ass_bgr(style.get('primary_color', '#FFFFFF'))}&"
@@ -279,7 +279,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if not cleaned_tokens:
                 continue
 
-            if mode in ("word_highlight", "karaoke_pop", "box_caption"):
+            pop_in = bool(style.get("pop_animation", mode in ("karaoke_pop", "word_reveal", "single_word")))
+
+            def _active(text: str) -> str:
+                # Palavra falada agora: cor de destaque + "pop" animado (cresce e assenta em ~170 ms)
+                if pop_in:
+                    return (
+                        f"{{{highlight_tag}\\fscx78\\fscy78\\t(0,90,\\fscx116\\fscy116)\\t(90,170,\\fscx106\\fscy106)}}"
+                        f"{text}{{\\fscx100\\fscy100{primary_tag}}}"
+                    )
+                return f"{{{highlight_tag}}}{text}{{{primary_tag}}}"
+
+            if mode in ("word_highlight", "karaoke_pop", "box_caption", "word_reveal", "single_word"):
                 for idx, active in enumerate(cleaned_tokens):
                     w_start = active["start"]
                     if idx + 1 < len(cleaned_tokens):
@@ -287,18 +298,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     else:
                         w_end = max(w_start + 0.25, active["end"])
                     w_end = min(clip_duration, w_end)
+                    if w_end <= w_start:
+                        continue
 
-                    parts = []
-                    for j, tok in enumerate(cleaned_tokens):
-                        if j == idx:
-                            if mode == "karaoke_pop":
-                                parts.append(f"{{{highlight_tag}\\fscx112\\fscy112}}{tok['text']}{{\\fscx100\\fscy100{primary_tag}}}")
+                    if mode == "single_word":
+                        # Uma palavra por vez, grande, acompanhando a fala
+                        text = _active(active["text"])
+                    elif mode == "word_reveal":
+                        # Palavras aparecem uma a uma (acumulando no bloco) conforme são faladas
+                        shown = [tok["text"] for tok in cleaned_tokens[:idx]]
+                        shown.append(_active(active["text"]))
+                        text = " ".join(shown)
+                    else:
+                        parts = []
+                        for j, tok in enumerate(cleaned_tokens):
+                            if j == idx:
+                                parts.append(_active(tok["text"]))
                             else:
-                                parts.append(f"{{{highlight_tag}}}{tok['text']}{{{primary_tag}}}")
-                        else:
-                            parts.append(tok["text"])
+                                parts.append(tok["text"])
+                        text = " ".join(parts)
                     events.append(
-                        f"Dialogue: 0,{format_ass_time(w_start)},{format_ass_time(w_end)},Main,,0,0,0,,{' '.join(parts)}"
+                        f"Dialogue: 0,{format_ass_time(w_start)},{format_ass_time(w_end)},Main,,0,0,0,,{text}"
                     )
             else:
                 c_start = cleaned_tokens[0]["start"]

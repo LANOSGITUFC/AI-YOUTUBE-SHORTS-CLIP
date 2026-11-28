@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional, List
 from app.database.session import SessionLocal
 from app.services.monitor import ChannelMonitor
 from app.services.downloader import VideoDownloader
-from app.services.transcriber import WhisperTranscriber
+from app.services.transcriber import WhisperTranscriber, resolve_clip_words
 from app.services.analyzer import HighlightAnalyzer
 from app.services.editor import VideoEditor
 from app.services.render_guard import RenderBusyError
@@ -98,6 +98,7 @@ class PipelineWorker:
                 self._log("info", f"Analisando momentos virais (3 a 7 cortes): {video.id}", stage="analyzing", progress=65)
                 clips = analyzer.analyze_video(video.id, max_clips=7, min_clips=3)
                 self._log("success", f"{len(clips)} cortes inéditos identificados em {video.id}", stage="analyzing", progress=75)
+                self._pretranscribe_clips(db, clips)
 
                 rendered_ids: List[int] = []
                 if auto_render_first and clips:
@@ -128,6 +129,22 @@ class PipelineWorker:
             self._state["current_video_title"] = None
             self._state["current_clip_id"] = None
             self._lock.release()
+
+    def _pretranscribe_clips(self, db, clips) -> None:
+        """
+        Transcrição automática por clipe: assim que os cortes nascem, cada janela sem fala transcrita
+        (ex.: live longa sem legenda do YouTube) passa pelo Whisper e fica em cache para a legenda.
+        """
+        done = 0
+        for clip in clips or []:
+            try:
+                words, source, _lang = resolve_clip_words(db, clip, auto_transcribe=True)
+                if source not in ("video_transcript", "custom"):
+                    done += 1
+            except Exception as exc:
+                logger.warning("Transcrição automática do clipe #%s falhou: %s", getattr(clip, "id", "?"), exc)
+        if done:
+            self._log("info", f"Legendas transcritas automaticamente para {done} corte(s).", stage="transcribing")
 
     def run_one_cycle(self) -> Dict[str, Any]:
         """Executa um ciclo completo de ponta a ponta sem sobrepor execuções simultâneas."""
@@ -232,6 +249,7 @@ class PipelineWorker:
                             clips = analyzer.analyze_video(pending_video.id, max_clips=20, min_clips=3)
                             results["clips_generated"] += len(clips)
                             self._log("success", f"{len(clips)} cortes criados para {pending_video.title[:45]}", stage="analyzing", progress=74)
+                            self._pretranscribe_clips(db, clips)
                     except Exception as e:
                         self._log("error", f"Erro no vídeo {pending_video.id}: {e}")
                         logger.debug(traceback.format_exc())

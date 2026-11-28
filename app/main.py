@@ -29,6 +29,9 @@ from app.services.deduplicator import DeduplicationEngine
 from app.services.downloader import VideoDownloader, extract_youtube_video_id, COOKIES_FILE
 from app.services.editor import VideoEditor
 from app.services.subtitles import OPUS_CAPTION_PRESETS
+from app.services.transcriber import (
+    WhisperTranscriber, resolve_clip_words, get_caption_language, normalize_language, SUPPORTED_LANGUAGES,
+)
 from app.services.scheduler import PostScheduler
 from app.services.experiments import ChannelExperimentEngine, get_experiment_catalog
 from app.services.priority import ranked_channels
@@ -688,29 +691,21 @@ def _parse_editor_config(raw: Optional[str]) -> Dict[str, Any]:
 
 
 def _load_clip_words(clip: ClipSegment) -> list:
-    ed_cfg = _parse_editor_config(clip.editor_config_json)
-    if isinstance(ed_cfg.get("custom_words"), list) and ed_cfg["custom_words"]:
-        return ed_cfg["custom_words"]
-    if not clip.video or not clip.video.transcript_path or not os.path.exists(clip.video.transcript_path):
-        return []
+    """Palavras da legenda do clipe (editadas > vídeo > cache da transcrição automática da janela)."""
     try:
-        with open(clip.video.transcript_path, "r", encoding="utf-8") as f:
-            t_data = json.load(f)
-        out = []
-        for seg in t_data.get("segments", []):
-            for w in seg.get("words", []):
-                ws = float(w.get("start", 0))
-                we = float(w.get("end", ws + 0.25))
-                if we >= float(clip.start_time) and ws <= float(clip.end_time) + 0.35:
-                    out.append({
-                        "word": str(w.get("word") or w.get("text") or "").strip(),
-                        "start": round(ws, 2),
-                        "end": round(we, 2),
-                        "emoji": str(w.get("emoji") or ""),
-                    })
-        return out
+        with SessionLocal() as sdb:
+            words, _src, _lang = resolve_clip_words(sdb, clip, auto_transcribe=False)
     except Exception:
         return []
+    return [
+        {
+            "word": str(w.get("word") or w.get("text") or "").strip(),
+            "start": round(float(w.get("start", 0)), 2),
+            "end": round(float(w.get("end", 0)), 2),
+            "emoji": str(w.get("emoji") or ""),
+        }
+        for w in words
+    ]
 
 
 def _serialize_clip(c: ClipSegment, include_words: bool = False) -> Dict[str, Any]:
@@ -1847,7 +1842,7 @@ def update_settings(payload: Dict[str, Any], db: Session = Depends(get_db)):
 
     allowed_simple = {
         "AI_PROVIDER", "WHISPER_MODEL", "CROP_MODE", "MAX_CLIP_DURATION", "MIN_CLIP_DURATION",
-        "AUTO_SCHEDULE", "TIMEZONE", "YT_COOKIES_BROWSER",
+        "AUTO_SCHEDULE", "TIMEZONE", "YT_COOKIES_BROWSER", "CAPTION_LANGUAGE", "TRANSCRIBE_MAX_MINUTES",
         "GEMINI_MODEL", "GROQ_MODEL", "OPENAI_MODEL", "CLAUDE_MODEL", "OLLAMA_URL", "OLLAMA_MODEL",
     }
 
@@ -2118,32 +2113,59 @@ def get_clip_words(clip_id: int, db: Session = Depends(get_db)):
     clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
     if not clip:
         raise HTTPException(status_code=404, detail="Clipe não encontrado.")
-    try:
-        ed_cfg = json.loads(clip.editor_config_json) if clip.editor_config_json else {}
-    except Exception:
-        ed_cfg = {}
+    words, source, lang = resolve_clip_words(db, clip, auto_transcribe=False)
+    return {
+        "clip_id": clip.id,
+        "source": source,
+        "language": lang or "auto",
+        "words": [
+            {k: v for k, v in {
+                "word": str(w.get("word") or "").strip(),
+                "start": round(float(w.get("start", 0)), 3),
+                "end": round(float(w.get("end", 0)), 3),
+                "emoji": w.get("emoji") or None,
+            }.items() if v is not None}
+            for w in words
+        ],
+    }
 
-    if isinstance(ed_cfg.get("custom_words"), list) and ed_cfg["custom_words"]:
-        return {"clip_id": clip.id, "source": "custom", "words": ed_cfg["custom_words"]}
 
-    words = []
-    if clip.video and clip.video.transcript_path and os.path.exists(clip.video.transcript_path):
-        try:
-            with open(clip.video.transcript_path, "r", encoding="utf-8") as f:
-                t_data = json.load(f)
-            for seg in t_data.get("segments", []):
-                for w in seg.get("words", []):
-                    ws = float(w.get("start", 0))
-                    we = float(w.get("end", 0))
-                    if we >= clip.start_time and ws <= clip.end_time:
-                        words.append({
-                            "word": str(w.get("word") or "").strip(),
-                            "start": round(ws, 3),
-                            "end": round(we, 3),
-                        })
-        except Exception:
-            pass
-    return {"clip_id": clip.id, "source": "transcript", "words": words}
+@app.post("/api/clips/{clip_id}/transcribe")
+def transcribe_clip_now(clip_id: int, payload: Optional[Dict[str, Any]] = None, db: Session = Depends(get_db)):
+    """
+    Transcreve de novo só a janela do clipe com Whisper (Groq/OpenAI/local), no idioma pedido.
+    Não apaga as palavras editadas: devolve a transcrição nova para o editor de palavras revisar e salvar.
+    """
+    clip = db.query(ClipSegment).filter(ClipSegment.id == clip_id).first()
+    if not clip or not clip.video:
+        raise HTTPException(status_code=404, detail="Clipe não encontrado.")
+    payload = payload or {}
+    transcriber = WhisperTranscriber(db)
+    status = transcriber.engines_status()
+    if not status["any"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Nenhum motor de transcrição disponível. Coloque a chave grátis da Groq (GROQ_API_KEY) em Configurações.",
+        )
+    lang = payload.get("language")
+    lang = get_caption_language(db, _parse_editor_config(clip.editor_config_json)) if not lang else normalize_language(lang)
+    res = transcriber.transcribe_window(clip.video, float(clip.start_time), float(clip.end_time), language=lang, force=True)
+    if res.get("source") == "no_audio":
+        raise HTTPException(status_code=400, detail="O áudio deste vídeo não está no disco. Baixe ou restaure o vídeo primeiro.")
+    return {
+        "clip_id": clip.id,
+        "source": res.get("source"),
+        "language": res.get("language") or "auto",
+        "words": res.get("words", []),
+    }
+
+
+@app.get("/api/transcription/status")
+def transcription_status(db: Session = Depends(get_db)):
+    """Quais motores de transcrição estão prontos e qual idioma de legenda está configurado."""
+    status = WhisperTranscriber(db).engines_status()
+    status["languages"] = SUPPORTED_LANGUAGES
+    return status
 
 
 @app.put("/api/clips/{clip_id}/words")
