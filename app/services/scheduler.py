@@ -244,10 +244,89 @@ class PostScheduler:
         self.db.refresh(post)
         return post
 
+    def get_min_virality_score(self) -> int:
+        row = self.db.query(SystemSetting).filter(SystemSetting.key == "MIN_VIRALITY_SCORE").first()
+        try:
+            val = int(str(row.value).strip()) if (row and row.value) else 88
+            return max(1, min(100, val))
+        except Exception:
+            return 88
+
+    def cancel_all_scheduled(
+        self,
+        only_below_score: Optional[int] = None,
+        delete_from_youtube: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Cancela todos os agendamentos (ou apenas os com score abaixo de only_below_score).
+        Libera os clipes de volta para 'rendered'/'analyzed' e limpa os slots em experimentos ativos.
+        """
+        from app.database.models import ChannelExperiment
+
+        posts = (
+            self.db.query(ScheduledPost)
+            .options(joinedload(ScheduledPost.clip))
+            .filter(ScheduledPost.status.in_(["pending", "awaiting_oauth", "scheduled_on_youtube", "failed"]))
+            .all()
+        )
+        cancelled_ids = []
+        yt_deleted = 0
+        yt_delete_errors = 0
+
+        for post in posts:
+            clip = post.clip
+            score = int(clip.virality_score or 0) if clip else 0
+            if only_below_score is not None and score >= only_below_score:
+                continue
+
+            if delete_from_youtube and post.youtube_video_id and not str(post.youtube_video_id).startswith("yt_sim_"):
+                try:
+                    from app.services.uploader import YouTubeUploader
+                    up = YouTubeUploader(self.db)
+                    ch = self.db.query(DestinationChannel).filter(DestinationChannel.id == post.destination_channel_id).first()
+                    if ch and ch.oauth_token_path and os.path.exists(ch.oauth_token_path):
+                        svc = up._get_youtube_service(ch.oauth_token_path)
+                        svc.videos().delete(id=post.youtube_video_id).execute()
+                        yt_deleted += 1
+                except Exception:
+                    yt_delete_errors += 1
+
+            post.status = "cancelled"
+            cancelled_ids.append(post.id)
+            if clip and clip.status == "scheduled":
+                clip.status = "rendered" if _has_valid_rendered_file(clip) else "analyzed"
+
+        # Limpa post_id em experimentos ativos para os posts cancelados
+        if cancelled_ids:
+            cancelled_set = set(cancelled_ids)
+            active_exps = self.db.query(ChannelExperiment).filter(ChannelExperiment.status == "active").all()
+            for exp in active_exps:
+                try:
+                    plan = json.loads(exp.plan_json or "[]")
+                    changed = False
+                    for slot in plan:
+                        if slot.get("post_id") in cancelled_set:
+                            slot["post_id"] = None
+                            slot["clip_id"] = None
+                            changed = True
+                    if changed:
+                        exp.plan_json = json.dumps(plan, ensure_ascii=False)
+                except Exception:
+                    pass
+
+        self.db.commit()
+        return {
+            "cancelled_count": len(cancelled_ids),
+            "cancelled_post_ids": cancelled_ids,
+            "only_below_score": only_below_score,
+            "youtube_deleted": yt_deleted,
+            "youtube_delete_errors": yt_delete_errors,
+        }
+
     def auto_schedule_all_rendered(self, force: bool = False) -> int:
         """
-        Distribui automaticamente clipes com status 'rendered' e MP4 válido em disco,
-        intercalando streamers e respeitando os pesos (%) de cada canal ativo.
+        Distribui automaticamente clipes com status 'rendered', MP4 válido em disco e
+        virality_score >= MIN_VIRALITY_SCORE (padrão 88), intercalando streamers.
         """
         if not force and not self.is_auto_schedule_enabled():
             return 0
@@ -256,10 +335,12 @@ class PostScheduler:
         if not active_channels:
             return 0
 
+        min_score = self.get_min_virality_score()
         unassigned_clips = (
             self.db.query(ClipSegment)
             .options(joinedload(ClipSegment.video))
             .filter(ClipSegment.status == "rendered")
+            .filter(ClipSegment.virality_score >= min_score)
             .order_by(ClipSegment.virality_score.desc())
             .all()
         )

@@ -73,6 +73,13 @@
           </span>
         </button>
 
+        <button class="nav-item" data-view="aichat" onclick="switchView('aichat')">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Chat IA & Compilados
+          </span>
+        </button>
+
         <button class="nav-item" data-view="timeline" onclick="switchView('timeline')">
           <span class="nav-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M7 6v12M17 6v12"/></svg>
@@ -384,15 +391,84 @@
               <p class="section-desc">Um vídeo a cada 18 horas com variância orgânica (±20 min) iniciando às 07:30 (07:30 → 01:30 → 19:30 → 13:30), convertido automaticamente para UTC no YouTube.</p>
             </div>
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-              <select id="calendarChannelSelect" class="select" style="width:240px;" onchange="loadCalendar()"></select>
-              <button class="btn btn-primary btn-sm" onclick="autoFillSchedule()">Auto-preencher grade</button>
+              <select id="calendarChannelSelect" class="select" style="width:220px;" onchange="loadCalendar()"></select>
+              <button class="btn btn-primary btn-sm" onclick="autoFillSchedule()">Auto-preencher (Score ≥ 88)</button>
+              <button class="btn btn-sm" onclick="cancelAllScheduledPosts(88)" title="Cancela apenas posts agendados cujo clipe tem score menor que 88">Limpar score &lt; 88</button>
+              <button class="btn btn-danger btn-sm" onclick="cancelAllScheduledPosts(null)" title="Cancela TODOS os vídeos agendados">Cancelar todos agendados</button>
             </div>
           </div>
-          <p class="section-desc cal-dnd-hint">Arraste um vídeo para outro horário ou dia (se estiver ocupado, os dois trocam de lugar), ou solte sobre outro canal. Clique para editar.</p>
+          <p class="section-desc cal-dnd-hint">Arraste um vídeo para outro horário ou dia (se estiver ocupado, os dois trocam de lugar), ou solte sobre outro canal. Clique para editar. Apenas clipes com <strong>Score ≥ 88</strong> entram automaticamente.</p>
           <div id="calendarGrid" class="calendar-grid"></div>
           <div id="channelDropZone" class="channel-drop-zone">
             <span>Soltar em outro canal (mesmo horário):</span>
             <div id="channelDropChips" class="channel-drop-chips"></div>
+          </div>
+        </section>
+
+        <!-- VIEW 3C: CHAT IA & COMPILADOS (VÍDEO LONGO 16:9 + SHORTS COMPILADOS) -->
+        <section id="view-aichat" class="view-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Chat com as IAs &amp; Estúdio de Compilados</h2>
+              <p class="section-desc">Converse direto com Groq, Gemini, OpenAI ou Claude usando o contexto real dos seus melhores clipes (Score ≥ 88). Escolha um tema para gerar Vídeos Longos (16:9) ou Shorts Compilados (9:16).</p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <select id="aiChatProvider" class="select" style="width:165px;">
+                <option value="auto" selected>Auto (Pool IA)</option>
+                <option value="groq">Groq (Llama 3.3)</option>
+                <option value="gemini">Google Gemini</option>
+                <option value="openai">OpenAI (GPT-4o)</option>
+                <option value="anthropic">Claude (Anthropic)</option>
+              </select>
+              <button class="btn btn-sm" onclick="clearAiChatHistory()">Limpar chat</button>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap:16px; align-items:start;">
+            <!-- CHAT PANEL -->
+            <div class="card" style="display:flex; flex-direction:column; gap:12px; padding:16px; min-height:520px;">
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="btn btn-ghost btn-sm" onclick="useAiChatPrompt('Proponha um vídeo longo compilado (16:9) e 2 shorts compilados sobre os melhores momentos de GTA 6 usando apenas clipes score >= 88')">🎬 Vídeo longo + Shorts GTA 6</button>
+                <button class="btn btn-ghost btn-sm" onclick="useAiChatPrompt('Liste os melhores clipes com score >= 88 disponíveis e sugira 3 temas fortes de compilados')">🔥 Melhores clipes ≥ 88</button>
+                <button class="btn btn-ghost btn-sm" onclick="useAiChatPrompt('Quero cancelar todos os vídeos agendados com score abaixo de 88')">🧹 Limpar agendados &lt; 88</button>
+              </div>
+
+              <div id="aiChatMessages" style="flex:1; min-height:340px; max-height:480px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding:10px; background:var(--bg-input); border:1px solid var(--border-subtle); border-radius:8px;">
+                <div style="color:var(--text-muted); font-size:13px;">Mande um tema ou pergunta para a IA propor Vídeos Longos (16:9), Shorts Compilados (9:16) e melhorias de SEO...</div>
+              </div>
+
+              <form onsubmit="sendAiChatMessage(event)" style="display:flex; gap:8px;">
+                <input id="aiChatInput" type="text" class="input" style="flex:1;" placeholder="Ex: Faz um vídeo longo compilado das melhores fugas de polícia no GTA 6..." autocomplete="off">
+                <button type="submit" class="btn btn-primary btn-sm" id="btnSendAiChat">Enviar</button>
+              </form>
+            </div>
+
+            <!-- COMPILATIONS BUILDER & GALLERY -->
+            <div style="display:flex; flex-direction:column; gap:14px;">
+              <div class="card" style="padding:16px; display:flex; flex-direction:column; gap:10px;">
+                <h3 style="margin:0; font-size:14.5px;">Gerar Compilado por Tema</h3>
+                <input id="compThemeInput" type="text" class="input" placeholder="Tema (ex: Melhores fugas de polícia no GTA 6)">
+                <input id="compTitleInput" type="text" class="input" placeholder="Título opcional do vídeo compilado">
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                  <select id="compModeSelect" class="select" style="flex:1;">
+                    <option value="long_16_9">Vídeo Longo (16:9 · 1920×1080)</option>
+                    <option value="short_9_16">Short Compilado (9:16 · até 58s)</option>
+                  </select>
+                  <input id="compMinScore" type="number" class="input" value="88" min="50" max="100" style="width:92px;" title="Score mínimo dos clipes">
+                </div>
+                <button class="btn btn-primary btn-sm" id="btnBuildCompilation" onclick="buildCompilationFromForm()">Renderizar Compilado</button>
+              </div>
+
+              <div class="card" style="padding:16px; display:flex; flex-direction:column; gap:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <h3 style="margin:0; font-size:14.5px;">Compilados Prontos</h3>
+                  <button class="btn btn-ghost btn-sm" onclick="loadCompilationsList()">↻ Atualizar</button>
+                </div>
+                <div id="compilationsList" style="display:flex; flex-direction:column; gap:10px; max-height:360px; overflow-y:auto;">
+                  <div style="color:var(--text-muted); font-size:12.5px;">Nenhum compilado renderizado ainda.</div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 

@@ -2942,6 +2942,81 @@ def export_clips_batch_zip(payload: Optional[Dict[str, Any]] = None, db: Session
 
 
 # ==========================================
+# CANCELAR AGENDADOS EM MASSA + CHAT IA + COMPILADOS
+# ==========================================
+
+@app.post("/api/scheduler/cancel-all")
+def cancel_all_scheduled_posts(payload: Optional[Dict[str, Any]] = None, db: Session = Depends(get_db)):
+    body = payload or {}
+    only_below = body.get("only_below_score")
+    if only_below is not None and only_below != "":
+        only_below = int(only_below)
+    else:
+        only_below = None
+    delete_yt = bool(body.get("delete_from_youtube", False))
+    scheduler = PostScheduler(db)
+    res = scheduler.cancel_all_scheduled(only_below_score=only_below, delete_from_youtube=delete_yt)
+    return res
+
+
+@app.get("/api/ai/chat/history")
+def get_ai_chat_history(db: Session = Depends(get_db)):
+    from app.services.ai_chat import StudioAIChat
+    return {"history": StudioAIChat(db).get_history()}
+
+
+@app.delete("/api/ai/chat/history")
+def clear_ai_chat_history(db: Session = Depends(get_db)):
+    from app.services.ai_chat import StudioAIChat
+    StudioAIChat(db).clear_history()
+    return {"status": "cleared"}
+
+
+@app.post("/api/ai/chat")
+def send_ai_chat_message(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    from app.services.ai_chat import StudioAIChat
+    msg = str(payload.get("message") or "").strip()
+    provider = str(payload.get("provider") or "auto").strip()
+    if not msg:
+        raise HTTPException(status_code=400, detail="Digite uma mensagem.")
+    try:
+        return StudioAIChat(db).send_message(msg, provider=provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/compilations")
+def list_video_compilations(db: Session = Depends(get_db)):
+    from app.services.compiler import VideoCompiler
+    return VideoCompiler(db).list_compilations()
+
+
+@app.post("/api/compilations/build")
+def build_video_compilation(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    from app.services.compiler import VideoCompiler
+    theme = str(payload.get("theme") or "Melhores Momentos").strip()
+    mode = str(payload.get("mode") or "long_16_9").strip()
+    title = payload.get("title")
+    min_score = int(payload.get("min_score", 88) or 88)
+    clip_ids = payload.get("clip_ids")
+    max_clips = payload.get("max_clips")
+    try:
+        rec = VideoCompiler(db).build_compilation(
+            theme=theme,
+            mode=mode,
+            title=title,
+            min_score=min_score,
+            clip_ids=clip_ids if isinstance(clip_ids, list) else None,
+            max_clips=int(max_clips) if max_clips else None,
+        )
+        return rec
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ==========================================
 # WEB DASHBOARD
 # ==========================================
 

@@ -374,12 +374,19 @@ class ChannelExperimentEngine:
         if not isinstance(plan, list):
             plan = []
 
-        # Clipes elegíveis que ainda não estão agendados/publicados
+        # Clipes elegíveis que ainda não estão agendados/publicados e atingem o score mínimo (padrão 88)
+        min_score_row = self.db.query(SystemSetting).filter(SystemSetting.key == "MIN_VIRALITY_SCORE").first()
+        try:
+            min_score = max(1, min(100, int(str(min_score_row.value).strip()))) if (min_score_row and min_score_row.value) else 88
+        except Exception:
+            min_score = 88
+
         statuses = ["rendered", "analyzed"] if include_analyzed else ["rendered"]
         candidates = (
             self.db.query(ClipSegment)
             .options(joinedload(ClipSegment.video))
             .filter(ClipSegment.status.in_(statuses))
+            .filter(ClipSegment.virality_score >= min_score)
             .order_by(ClipSegment.virality_score.desc(), ClipSegment.created_at.desc())
             .all()
         )

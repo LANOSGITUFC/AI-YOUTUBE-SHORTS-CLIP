@@ -90,7 +90,7 @@ class TestSevenDayExperiments(unittest.TestCase):
                 end_time=10.0 + idx * 70 + dur,
                 duration=dur,
                 title=f"Clipe Original {idx}",
-                virality_score=90 - idx,
+                virality_score=92 - idx,
                 category="funny",
                 clip_path=mp4_path,
                 status="rendered",

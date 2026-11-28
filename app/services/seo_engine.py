@@ -45,19 +45,19 @@ KNOWN_GAMES = [
     ("React", ["reage", "react", "reagindo"]),
 ]
 
-SEO_SYSTEM_PROMPT = """Você é um editor humano brasileiro criando títulos e descrições REALISTAS e HONESTOS para YouTube Shorts de streamers e gamers.
+SEO_SYSTEM_PROMPT = """Você é um estrategista de SEO e editor brasileiro especialista em YouTube Shorts de streamers e gamers.
 
-REGRAS CRÍTICAS DE REALISMO (OBRIGATÓRIAS):
-- NUNCA invente fatos, sustos, brigas, recordes ou eventos que NÃO estejam explicitamente na fala transcrita ou no título original.
-- NUNCA use clickbait exagerado ou falso como "Reação intensa", "Quase caiu da cadeira", "Você não vai acreditar", "Espera até o final", "Ninguém esperava", "Momento insano", "Quebrou tudo".
-- Se o trecho for uma conversa simples ou gameplay tranquila, descreva exatamente isso de forma natural e direta — prometa apenas o que realmente acontece no corte.
+REGRAS OBRIGATÓRIAS:
+- NUNCA repita o título genérico da live inteira! Cada corte TEM que ter um título ÚNICO e chamativo baseado no que REALMENTE é falado ou acontece naquele trecho específico.
+- NUNCA invente fatos que não estejam na fala transcrita ou no contexto do vídeo.
 - NUNCA corte palavras no meio e NÃO use TUDO EM MAIÚSCULO.
+- Varie a estrutura do título: use citações reais da fala, perguntas instigantes, contraste de situação, humor direto ou mini-história.
 
-Formato:
-1. "title": 28 a 68 caracteres, natural em PT-BR, fiel ao conteúdo real do corte, máximo 1 emoji (ou nenhum). Inclua o nome do streamer e/ou o jogo quando fizer sentido.
-2. "description": 1 a 2 frases curtas e realistas dando contexto verdadeiro do trecho + uma pergunta simples e natural relacionada ao assunto.
-3. "tags": lista de 12 a 15 tags de busca curtas em minúsculas (sem #), fiéis ao streamer e ao jogo.
-4. "hashtags": lista de 4 a 5 hashtags (com #), começando com #shorts + streamer + jogo + nicho.
+Formato obrigatório:
+1. "title": 30 a 72 caracteres, forte e único em PT-BR (máximo 1 emoji). Mencione o streamer e/ou o jogo de forma natural.
+2. "description": 2 a 3 frases envolventes dando contexto real do corte + uma pergunta para gerar comentários.
+3. "tags": lista de 22 a 30 tags de busca em minúsculas (sem #), misturando cauda curta e cauda longa (streamer, jogo, assunto falado no trecho, cortes, lives, shorts brasil, gameplay).
+4. "hashtags": lista de 12 a 15 hashtags (com #), começando com #shorts + streamer + jogo + tema do trecho + nicho gamer.
 
 Retorne APENAS JSON válido:
 {
@@ -164,6 +164,13 @@ class ViralSEOEngine:
         raw_ch = clip.video.channel.name if (clip.video and clip.video.channel) else "Streamer"
         streamer = _clean_streamer_name(raw_ch)
         video_title = clip.video.title if clip.video else ""
+        related_video_url = ""
+        if clip.video:
+            raw_url = (clip.video.url or "").strip()
+            if raw_url.startswith("http"):
+                related_video_url = raw_url
+            elif clip.video.id and not str(clip.video.id).startswith("local_"):
+                related_video_url = f"https://www.youtube.com/watch?v={clip.video.id}"
         game = _detect_game_or_topic(video_title)
         category = (clip.category or "highlight").lower()
         transcript_excerpt = self._clip_transcript_excerpt(clip)
@@ -183,9 +190,16 @@ class ViralSEOEngine:
                 transcript_excerpt=transcript_excerpt,
                 seed=(clip.id or int(clip.start_time or 1)) + nonce + (len(angle) * 17 if angle else 0),
                 style_angle=angle,
+                related_video_url=related_video_url,
             )
 
-        normalized = self._normalize_seo(result, streamer, game)
+        normalized = self._normalize_seo(
+            result,
+            streamer,
+            game,
+            related_video_url=related_video_url,
+            related_video_title=video_title,
+        )
         if angle:
             normalized["style_angle"] = angle
         return normalized
@@ -333,6 +347,22 @@ class ViralSEOEngine:
             return s
         return s[:max_len].rsplit(" ", 1)[0].strip(" -|:;,.")
 
+    def _extract_spoken_keywords(self, text: str) -> List[str]:
+        stop = {
+            "para", "como", "mais", "muito", "isso", "esse", "essa", "aqui", "agora",
+            "tava", "estava", "entao", "então", "porque", "quando", "onde", "quem",
+            "qual", "sobre", "tudo", "nada", "cara", "mano", "gente", "você", "voce",
+            "eles", "elas", "nosso", "nossa", "pelo", "pela", "comigo", "ainda", "assim",
+            "pode", "fazer", "feito", "aqui", "dessa", "desse", "disso", "mesmo", "nunca",
+        }
+        words = re.findall(r"[A-Za-zÀ-ÿ0-9]{4,}", (text or "").lower())
+        freq: Dict[str, int] = {}
+        for w in words:
+            if w in stop or w.isdigit():
+                continue
+            freq[w] = freq.get(w, 0) + 1
+        return [w for w, _ in sorted(freq.items(), key=lambda kv: (-kv[1], -len(kv[0])))[:10]]
+
     def _build_smart_ptbr_seo(
         self,
         streamer: str,
@@ -342,110 +372,174 @@ class ViralSEOEngine:
         transcript_excerpt: str,
         seed: int = 1,
         style_angle: Optional[str] = None,
+        related_video_url: str = "",
     ) -> Dict[str, Any]:
         rng = random.Random(seed)
         in_game = f" no {game}" if (game and game != "React") else (" reagindo" if game == "React" else " na live")
 
-        # Extrai um resumo limpo do título original (sem emojis exagerados / sem gritaria)
         clean_vt = re.sub(r"#[A-Za-zÀ-ÿ0-9_]+", "", video_title or "")
         clean_vt = re.sub(r"\s+", " ", clean_vt).strip(" -|!?:")
-        # Converte frases inteiras em CAPS para formato normal legível
         if clean_vt and sum(1 for c in clean_vt if c.isupper()) > len(clean_vt) * 0.55:
             clean_vt = clean_vt.capitalize()
-        topic = self._clean_word_truncate(clean_vt, 44)
+        topic = self._clean_word_truncate(clean_vt, 42)
 
-        # Extrai trecho curto real falado na transcrição se disponível e legível
+        # Escolhe uma frase ÚNICA da transcrição deste corte (usando seed para não repetir a mesma frase)
+        sentences = [
+            s.strip() for s in re.split(r"[.!?\n]+", transcript_excerpt or "")
+            if 14 <= len(s.strip()) <= 68
+        ]
         spoken_snippet = ""
-        if transcript_excerpt and len(transcript_excerpt.strip()) >= 14:
-            first_sent = re.split(r"[.!?\n]", transcript_excerpt.strip())[0].strip()
-            if 12 <= len(first_sent) <= 58:
-                spoken_snippet = self._clean_word_truncate(first_sent, 46)
+        if sentences:
+            chosen_s = sentences[seed % len(sentences)]
+            spoken_snippet = self._clean_word_truncate(chosen_s, 46)
+
+        spoken_kws = self._extract_spoken_keywords(f"{transcript_excerpt} {video_title}")
+        kw_focus = spoken_kws[seed % len(spoken_kws)].capitalize() if spoken_kws else ""
 
         if spoken_snippet:
             base_candidates = [
                 f'{streamer}{in_game}: "{spoken_snippet}"',
-                f"{streamer} — {spoken_snippet}",
-                f"{spoken_snippet} ({streamer}{in_game})",
+                f'"{spoken_snippet}" — {streamer}{in_game}',
+                f"{spoken_snippet} | {streamer}",
+                f"Quando o {streamer} mandou: \"{self._clean_word_truncate(spoken_snippet, 34)}\"",
+                f"{streamer} {in_game.strip()} — {spoken_snippet}",
+                f"Olha o papo do {streamer}: \"{self._clean_word_truncate(spoken_snippet, 36)}\"",
             ]
         elif topic:
             base_candidates = [
-                f"{streamer}: {topic}",
-                f"Trecho da live do {streamer} — {topic}",
-                f"{topic} | {streamer}",
+                f"{streamer} — {topic}",
+                f"{topic} ({streamer}{in_game})",
+                f"O momento de {kw_focus or topic} do {streamer}{in_game}",
+                f"{streamer} enfrentando {kw_focus or topic}{in_game}",
+                f"Como o {streamer} lidou com {kw_focus or topic}{in_game}",
+                f"{topic} | Cortes do {streamer}",
             ]
         else:
             base_candidates = [
-                f"Trecho da gameplay do {streamer}{in_game}",
-                f"Corte da live do {streamer}{in_game}",
-                f"{streamer} jogando{in_game}",
+                f"{streamer} jogando{in_game} — melhor corte",
+                f"Momento da gameplay do {streamer}{in_game}",
+                f"O que rolou na live do {streamer}{in_game}",
+                f"Corte selecionado: {streamer}{in_game}",
             ]
 
         angle_templates = {
             "curiosidade": [
-                f"{streamer}: {topic}" if topic else f"Trecho da live do {streamer}{in_game}",
-                f"Como o {streamer} resolveu isso{in_game}",
+                f"Como o {streamer} saiu dessa{in_game}?" + (f" ({kw_focus})" if kw_focus else ""),
+                f"O detalhe que quase passou batido: {streamer}{in_game}",
+                f'"{spoken_snippet}" — o que aconteceu depois? ({streamer})' if spoken_snippet else f"{streamer}: {topic}",
             ],
             "choque_reacao": [
-                f"A reação do {streamer}{in_game}",
-                f"{streamer} reagindo{in_game}: {topic}" if topic else f"{streamer} ao vivo{in_game}",
+                f"A reação do {streamer} com {kw_focus or 'isso'}{in_game}",
+                f'{streamer} reagindo{in_game}: "{self._clean_word_truncate(spoken_snippet, 34)}"' if spoken_snippet else f"{streamer} ao vivo{in_game}: {topic}",
             ],
             "pergunta_debate": [
                 f"O que você faria no lugar do {streamer}{in_game}?",
                 f"Você concordou com o {streamer} nessa?{in_game}",
+                f"Faria igual ao {streamer} ou diferente?{in_game}",
             ],
             "direto_curto": [
-                f"{streamer}{in_game}",
-                f"{streamer}: {self._clean_word_truncate(topic, 26)}" if topic else f"Corte do {streamer}",
+                f'{streamer}: "{self._clean_word_truncate(spoken_snippet, 24)}"' if spoken_snippet else f"{streamer}{in_game}",
+                f"{streamer} · {kw_focus or self._clean_word_truncate(topic, 24)}",
             ],
             "storytelling": [
-                f"Momento da live do {streamer}{in_game}",
-                f"Trecho da gameplay do {streamer}: {self._clean_word_truncate(topic, 32)}" if topic else f"Gameplay do {streamer}{in_game}",
+                f"Tudo parecia normal até {kw_focus or 'esse momento'} ({streamer}{in_game})",
+                f"Em poucos segundos na live do {streamer}{in_game}: {self._clean_word_truncate(spoken_snippet or topic, 28)}",
             ],
         }
 
         pool = angle_templates.get(style_angle or "") or base_candidates
-        title = self._clean_word_truncate(rng.choice(pool), 42 if style_angle == "direto_curto" else 70)
+        title = self._clean_word_truncate(rng.choice(pool), 44 if style_angle == "direto_curto" else 72)
 
         context_line = (
-            f"Trecho da live de {streamer}{in_game}."
-            if game
-            else f"Trecho recente da live de {streamer}."
+            f"Corte selecionado da live de {streamer}{in_game}"
+            + (f" — {topic}." if topic else ".")
         )
-        cta_line = "O que você achou desse momento? Comenta aí."
-        description = f"{context_line} {cta_line}\n\nCréditos: {streamer}"
+        cta_line = rng.choice([
+            "O que você achou desse momento? Comenta aí embaixo!",
+            "Você faria diferente nessa jogada? Deixa sua opinião nos comentários!",
+            "Se curtiu o corte, deixa o like e se inscreve para mais momentos de lives!",
+        ])
+        description = f"{context_line}\n{cta_line}"
 
         streamer_low = streamer.lower()
         tags = [
             streamer_low,
             f"cortes {streamer_low}",
             f"{streamer_low} live",
-            f"gameplay {streamer_low}",
+            f"{streamer_low} cortes",
+            f"{streamer_low} gameplay",
+            f"melhores momentos {streamer_low}",
             "cortes de lives",
+            "cortes de streamers",
             "clips gamers",
+            "clips brasil",
             "youtube shorts",
             "shorts brasil",
-            "gameplay",
+            "shorts gamer",
+            "gameplay brasil",
+            "melhores momentos",
+            "lives brasil",
+            "twitch brasil",
+            "gaming br",
         ]
         if game:
             g_low = game.lower()
-            tags.extend([g_low, f"{g_low} brasil", f"{streamer_low} {g_low}", f"cortes {g_low}"])
+            tags.extend([
+                g_low,
+                f"{g_low} brasil",
+                f"{g_low} gameplay",
+                f"{g_low} shorts",
+                f"{streamer_low} {g_low}",
+                f"cortes {g_low}",
+                f"melhores momentos {g_low}",
+            ])
+        for kw in spoken_kws[:8]:
+            tags.append(kw)
+            if game:
+                tags.append(f"{game.lower()} {kw}")
 
-        hashtags = ["#shorts", f"#{_slug_tag(streamer)}"]
+        hashtags = [
+            "#shorts",
+            f"#{_slug_tag(streamer)}",
+            f"#cortes{_slug_tag(streamer)}",
+        ]
         if game:
-            hashtags.append(f"#{_slug_tag(game)}")
-        hashtags.extend(["#cortes", "#gaming"])
+            g_slug = _slug_tag(game)
+            hashtags.extend([f"#{g_slug}", f"#{g_slug}brasil", f"#{g_slug}gameplay"])
+        for kw in spoken_kws[:4]:
+            ks = _slug_tag(kw)
+            if ks and len(ks) >= 4:
+                hashtags.append(f"#{ks}")
+        hashtags.extend([
+            "#cortes",
+            "#cortesdelives",
+            "#gaming",
+            "#gameplay",
+            "#clips",
+            "#streamer",
+            "#youtubeshorts",
+            "#viral",
+        ])
 
         return {
             "title": title,
             "description": description,
             "tags": tags,
             "hashtags": hashtags,
+            "related_video_url": related_video_url,
         }
 
-    def _normalize_seo(self, raw: Dict[str, Any], streamer: str, game: str) -> Dict[str, Any]:
-        title = self._clean_word_truncate(str(raw.get("title") or f"Trecho da live de {streamer}"), 76)
+    def _normalize_seo(
+        self,
+        raw: Dict[str, Any],
+        streamer: str,
+        game: str,
+        related_video_url: str = "",
+        related_video_title: str = "",
+    ) -> Dict[str, Any]:
+        title = self._clean_word_truncate(str(raw.get("title") or f"Corte da live de {streamer}"), 76)
 
-        description = str(raw.get("description") or f"Corte de {streamer}.").strip()[:1200]
+        base_desc = str(raw.get("description") or f"Corte da live de {streamer}.").strip()[:1400]
 
         raw_tags = raw.get("tags") or []
         if isinstance(raw_tags, str):
@@ -454,11 +548,38 @@ class ViralSEOEngine:
         clean_tags: List[str] = []
         for t in raw_tags:
             ct = str(t).strip().lstrip("#").lower()
-            if ct and ct not in seen_t:
+            if ct and len(ct) <= 45 and ct not in seen_t:
                 seen_t.add(ct)
                 clean_tags.append(ct)
-        if not clean_tags:
-            clean_tags = [streamer.lower(), "cortes", "gaming", "youtube shorts"]
+        # Garante conjunto robusto de tags (20-30 tags)
+        fallback_tags = [
+            streamer.lower(),
+            f"cortes {streamer.lower()}",
+            f"{streamer.lower()} live",
+            "cortes de lives",
+            "clips gamers",
+            "youtube shorts",
+            "shorts brasil",
+            "gameplay brasil",
+            "melhores momentos",
+            "streamers brasil",
+            "gaming br",
+        ]
+        if game:
+            fallback_tags.extend([game.lower(), f"{game.lower()} brasil", f"{streamer.lower()} {game.lower()}", f"cortes {game.lower()}"])
+        for ft in fallback_tags:
+            if ft not in seen_t:
+                seen_t.add(ft)
+                clean_tags.append(ft)
+
+        # Limita tags respeitando o teto oficial do YouTube (500 chars combinados, até 30 tags)
+        yt_tags: List[str] = []
+        total_tag_chars = 0
+        for t in clean_tags[:30]:
+            if total_tag_chars + len(t) + 2 > 460:
+                break
+            yt_tags.append(t)
+            total_tag_chars += len(t) + 2
 
         raw_hash = raw.get("hashtags") or []
         if isinstance(raw_hash, str):
@@ -470,17 +591,43 @@ class ViralSEOEngine:
             if slug and slug not in seen_h:
                 seen_h.add(slug)
                 clean_hash.append(f"#{slug}")
-        if "#shorts" not in clean_hash:
-            clean_hash.insert(0, "#shorts")
-        clean_hash = clean_hash[:6]  # 3 a 6 hashtags é o ponto ótimo do algoritmo do YouTube Shorts
+        must_hash = ["#shorts", f"#{_slug_tag(streamer)}", "#cortes", "#cortesdelives", "#gaming", "#gameplay", "#clips", "#youtubeshorts"]
+        if game:
+            must_hash.insert(2, f"#{_slug_tag(game)}")
+            must_hash.insert(3, f"#{_slug_tag(game)}brasil")
+        for mh in must_hash:
+            if mh and mh != "#" and mh not in seen_h:
+                seen_h.add(mh)
+                clean_hash.append(mh)
+        if "#shorts" in clean_hash:
+            clean_hash.remove("#shorts")
+        clean_hash.insert(0, "#shorts")
+        clean_hash = clean_hash[:15]
+
+        # Monta descrição completa com Vídeo Longo Relacionado + Créditos + Bloco de Tags + 12-15 Hashtags
+        desc_parts = [base_desc]
+        rel_url = (related_video_url or raw.get("related_video_url") or "").strip()
+        if rel_url and rel_url not in base_desc:
+            rel_label = self._clean_word_truncate(related_video_title, 70) if related_video_title else "Assista ao vídeo completo"
+            desc_parts.append(f"🎬 Vídeo longo relacionado ({rel_label}):\n{rel_url}")
+        if f"Créditos: {streamer}" not in base_desc:
+            desc_parts.append(f"📌 Créditos: {streamer}")
+        tags_csv = ", ".join(yt_tags)
+        hashtags_str = " ".join(clean_hash)
+        if "Tags:" not in base_desc:
+            desc_parts.append(f"🔎 Tags: {tags_csv}")
+        if hashtags_str not in base_desc:
+            desc_parts.append(hashtags_str)
+        full_description = "\n\n".join(p for p in desc_parts if p).strip()[:4500]
 
         return {
             "title": title,
-            "description": description,
-            "tags": clean_tags[:15],
-            "tags_csv": ", ".join(clean_tags[:15]),
+            "description": full_description,
+            "tags": yt_tags,
+            "tags_csv": tags_csv,
             "hashtags": clean_hash,
-            "hashtags_str": " ".join(clean_hash),
+            "hashtags_str": hashtags_str,
+            "related_video_url": rel_url,
             "detected_streamer": streamer,
             "detected_game": game,
         }

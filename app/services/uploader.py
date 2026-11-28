@@ -268,7 +268,7 @@ class YouTubeUploader:
                 "snippet": {
                     "title": title[:100],
                     "description": description[:4900],
-                    "tags": tags[:15],
+                    "tags": tags[:30],
                     "categoryId": "20",  # Gaming
                 },
                 "status": {

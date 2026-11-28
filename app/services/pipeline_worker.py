@@ -279,7 +279,13 @@ class PipelineWorker:
                         self._log("error", f"Erro no vídeo {pending_video.id}: {e}")
                         logger.debug(traceback.format_exc())
 
-                # 3. Renderizar até 3 clipes por ciclo (prioriza clipes já agendados no Lab 7 Dias sem MP4, depois analisados)
+                # 3. Renderizar até 3 clipes por ciclo (prioriza clipes agendados no Lab sem MP4, depois analisados com score >= 88)
+                min_score_row = db.query(SystemSetting).filter(SystemSetting.key == "MIN_VIRALITY_SCORE").first()
+                try:
+                    min_render_score = max(1, min(100, int(str(min_score_row.value).strip()))) if (min_score_row and min_score_row.value) else 88
+                except Exception:
+                    min_render_score = 88
+
                 for _render_slot in range(3):
                     candidate_clips = (
                         db.query(ClipSegment)
@@ -290,7 +296,7 @@ class PipelineWorker:
                     renderable_clips = [
                         c for c in candidate_clips
                         if (
-                            c.status == "analyzed"
+                            (c.status == "analyzed" and (int(c.virality_score or 0) >= min_render_score or c.queue_rank is not None))
                             or (c.status == "scheduled" and (not c.clip_path or not os.path.isfile(c.clip_path)))
                         )
                         and c.video

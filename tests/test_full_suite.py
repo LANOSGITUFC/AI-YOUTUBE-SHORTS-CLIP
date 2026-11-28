@@ -138,13 +138,27 @@ class TestShortsClipPipeline(unittest.TestCase):
                 start_time=float(200 + i * 100),
                 end_time=float(240 + i * 100),
                 title=f"Clipe de Teste #{i+1}",
-                virality_score=85 + i
+                virality_score=88 + i
             )
             fake_mp4 = f"./data/clips/_test_sched_{i}.mp4"
             shutil.copyfile(sample_mp4, fake_mp4)
             created_files.append(fake_mp4)
             c.clip_path = fake_mp4
             c.status = "rendered"
+
+        # Clipe com SCORE 66 (< 88) NÃO pode ser agendado mesmo com MP4 válido
+        low_clip = dedup.register_segment(
+            video_id="test_gta6_alanzoka",
+            start_time=750.0,
+            end_time=785.0,
+            title="Clipe Fraco Score 66",
+            virality_score=66
+        )
+        low_mp4 = "./data/clips/_test_sched_low.mp4"
+        shutil.copyfile(sample_mp4, low_mp4)
+        created_files.append(low_mp4)
+        low_clip.clip_path = low_mp4
+        low_clip.status = "rendered"
 
         # Clipe com arquivo de 0 bytes NÃO pode ser agendado
         empty_clip = dedup.register_segment(
@@ -164,7 +178,7 @@ class TestShortsClipPipeline(unittest.TestCase):
 
         try:
             count = scheduler.auto_schedule_all_rendered()
-            self.assertEqual(count, 3, "Deveria agendar apenas os 3 clipes com MP4 válido (> 4KB)")
+            self.assertEqual(count, 3, "Deveria agendar apenas os 3 clipes com MP4 válido e Score >= 88")
 
             matrix_data = scheduler.get_calendar_matrix(self.dest.id, days=7)
             # Cadência de 18h em 7 dias (168h / 18h ≈ 9 slots)
@@ -176,6 +190,10 @@ class TestShortsClipPipeline(unittest.TestCase):
             pt_days = {"Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"}
             for day in matrix_data["matrix"]:
                 self.assertIn(day["day_name"], pt_days)
+
+            # Testa cancelamento em massa de todos os agendados
+            cancel_res = scheduler.cancel_all_scheduled(only_below_score=None)
+            self.assertEqual(cancel_res["cancelled_count"], 3)
         finally:
             for p in created_files:
                 if os.path.exists(p):

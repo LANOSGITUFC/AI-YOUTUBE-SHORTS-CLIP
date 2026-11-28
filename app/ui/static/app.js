@@ -7,6 +7,7 @@ const VIEW_TITLES = {
   calendar: 'Agenda Semanal (4/dia × 7 dias)',
   experiments: 'Laboratório 7 Dias — Testes A/B por Canal',
   analytics: 'Analytics Real, BGM & Google Drive',
+  aichat: 'Chat com as IAs & Estúdio de Compilados',
   timeline: 'Inspetor de Deduplicação & Linha do Tempo',
   presets: 'Estilo de Legendas & Presets',
   channels: 'Canais Monitorados 24/7',
@@ -110,6 +111,7 @@ function refreshCurrentView() {
   else if (currentView === 'calendar') loadCalendar();
   else if (currentView === 'experiments') loadExperimentsView();
   else if (currentView === 'analytics') loadAnalyticsAndStorageView();
+  else if (currentView === 'aichat') loadAiChatView();
   else if (currentView === 'timeline') loadVideosForTimeline();
   else if (currentView === 'presets') {
     loadSettingsIntoUI();
@@ -3014,3 +3016,215 @@ async function cleanVideosAndClipsOnly() {
     if (btn) { btn.disabled = false; btn.textContent = 'Limpar vídeos e clipes'; }
   }
 }
+
+/* ==========================================
+   CANCELAR AGENDADOS EM MASSA + CHAT IA + COMPILADOS
+   ========================================== */
+
+let _aiChatActionCache = [];
+
+async function cancelAllScheduledPosts(onlyBelowScore = null) {
+  const msg = onlyBelowScore != null
+    ? `Cancelar todos os vídeos agendados com Score abaixo de ${onlyBelowScore}?`
+    : 'Cancelar TODOS os vídeos agendados em todos os canais?\n\nOs clipes continuam salvos em Clipes 9:16 e apenas clipes com Score ≥ 88 voltarão a ser agendados automaticamente.';
+  if (!confirm(msg)) return;
+  try {
+    const res = await fetch('/api/scheduler/cancel-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ only_below_score: onlyBelowScore, delete_from_youtube: false }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao cancelar agendamentos.', 'error');
+      return;
+    }
+    showToast(`${data.cancelled_count || 0} agendamento(s) cancelado(s)!`, 'success');
+    await Promise.all([loadCalendar(), fetchStatus()]);
+  } catch (e) {
+    showToast('Erro de rede ao cancelar agendamentos.', 'error');
+  }
+}
+
+async function loadAiChatView() {
+  try {
+    const [histRes] = await Promise.all([
+      fetch('/api/ai/chat/history'),
+      loadCompilationsList(),
+    ]);
+    const histData = histRes.ok ? await histRes.json() : { history: [] };
+    renderAiChatMessages(histData.history || []);
+  } catch (e) {
+    showToast('Erro ao carregar Chat IA.', 'error');
+  }
+}
+
+function renderAiChatMessages(history) {
+  const box = document.getElementById('aiChatMessages');
+  if (!box) return;
+  _aiChatActionCache = [];
+  if (!history || !history.length) {
+    box.innerHTML = `<div style="color:var(--text-muted); font-size:13px;">Mande um tema ou pergunta para a IA propor Vídeos Longos (16:9), Shorts Compilados (9:16) e melhorias de SEO...</div>`;
+    return;
+  }
+  box.innerHTML = history.map((m) => {
+    const isUser = m.role === 'user';
+    const actions = Array.isArray(m.actions) ? m.actions : [];
+    const actionsHtml = actions.length
+      ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">` +
+        actions.map((act) => {
+          const idx = _aiChatActionCache.length;
+          _aiChatActionCache.push(act);
+          return `<button class="btn btn-primary btn-sm" onclick="runAiChatAction(${idx})">${esc(act.label || 'Executar')}</button>`;
+        }).join('') +
+        `</div>`
+      : '';
+    const provBadge = !isUser && m.provider
+      ? `<span class="badge badge-info" style="font-size:9.5px; margin-left:6px;">${esc(String(m.provider).toUpperCase())}</span>`
+      : '';
+    return `
+      <div style="align-self:${isUser ? 'flex-end' : 'flex-start'}; max-width:90%; padding:10px 12px; border-radius:10px; background:${isUser ? 'rgba(239,68,68,0.16)' : 'var(--bg-surface)'}; border:1px solid var(--border-subtle);">
+        <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">
+          <strong>${isUser ? 'Você' : 'IA Diretor Criativo'}</strong>${provBadge}
+        </div>
+        <div style="font-size:13px; white-space:pre-wrap; line-height:1.45;">${esc(m.content || '')}</div>
+        ${actionsHtml}
+      </div>
+    `;
+  }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+function useAiChatPrompt(text) {
+  const inp = document.getElementById('aiChatInput');
+  if (inp) {
+    inp.value = text;
+    inp.focus();
+  }
+}
+
+async function sendAiChatMessage(ev) {
+  if (ev) ev.preventDefault();
+  const inp = document.getElementById('aiChatInput');
+  const btn = document.getElementById('btnSendAiChat');
+  const provider = document.getElementById('aiChatProvider')?.value || 'auto';
+  const msg = (inp?.value || '').trim();
+  if (!msg) return;
+  if (inp) inp.value = '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Pensando...'; }
+  try {
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, provider }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao conversar com a IA.', 'error');
+      return;
+    }
+    renderAiChatMessages(data.history || []);
+  } catch (e) {
+    showToast('Erro de rede ao enviar mensagem para a IA.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Enviar'; }
+  }
+}
+
+async function clearAiChatHistory() {
+  try {
+    await fetch('/api/ai/chat/history', { method: 'DELETE' });
+    renderAiChatMessages([]);
+    showToast('Histórico do chat limpo.', 'success');
+  } catch (e) {
+    showToast('Erro ao limpar chat.', 'error');
+  }
+}
+
+async function runAiChatAction(actionIdx) {
+  const act = _aiChatActionCache[actionIdx];
+  if (!act) return;
+  if (act.type === 'cancel_scheduled') {
+    await cancelAllScheduledPosts(act.payload?.only_below_score ?? null);
+    return;
+  }
+  if (act.type === 'build_compilation') {
+    showToast(`Renderizando compilado "${act.payload?.theme || ''}"... aguarde alguns segundos.`, 'info');
+    try {
+      const res = await fetch('/api/compilations/build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(act.payload || {}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.detail || 'Erro ao compilar vídeo.', 'error');
+        return;
+      }
+      showToast(`Compilado pronto: ${data.title} (${data.duration}s · ${data.resolution})!`, 'success');
+      await loadCompilationsList();
+    } catch (e) {
+      showToast('Erro de rede ao compilar vídeo.', 'error');
+    }
+  }
+}
+
+async function buildCompilationFromForm() {
+  const theme = (document.getElementById('compThemeInput')?.value || '').trim();
+  const title = (document.getElementById('compTitleInput')?.value || '').trim();
+  const mode = document.getElementById('compModeSelect')?.value || 'long_16_9';
+  const minScore = Number(document.getElementById('compMinScore')?.value || 88);
+  if (!theme) {
+    showToast('Digite um tema para o compilado.', 'error');
+    return;
+  }
+  const btn = document.getElementById('btnBuildCompilation');
+  if (btn) { btn.disabled = true; btn.textContent = 'Renderizando...'; }
+  try {
+    const res = await fetch('/api/compilations/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme, title: title || null, mode, min_score: minScore }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Erro ao gerar compilado.', 'error');
+      return;
+    }
+    showToast(`Compilado renderizado: ${data.title} (${data.duration}s · ${data.clip_count} clipes)!`, 'success');
+    await loadCompilationsList();
+  } catch (e) {
+    showToast('Erro de rede ao renderizar compilado.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Renderizar Compilado'; }
+  }
+}
+
+async function loadCompilationsList() {
+  const el = document.getElementById('compilationsList');
+  if (!el) return;
+  try {
+    const res = await fetch('/api/compilations');
+    const items = res.ok ? await res.json() : [];
+    if (!items.length) {
+      el.innerHTML = `<div style="color:var(--text-muted); font-size:12.5px;">Nenhum compilado renderizado ainda.</div>`;
+      return;
+    }
+    el.innerHTML = items.map((it) => `
+      <div style="padding:10px; border:1px solid var(--border-subtle); border-radius:8px; background:var(--bg-input); display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+          <strong style="font-size:12.5px;">${esc(it.title)}</strong>
+          <span class="badge ${it.mode === 'long_16_9' ? 'badge-info' : 'badge-ok'}" style="font-size:10px;">${it.mode === 'long_16_9' ? 'LONGO 16:9' : 'SHORT 9:16'}</span>
+        </div>
+        <div style="font-size:11.5px; color:var(--text-muted);">${esc(it.clip_count)} clipes · ${esc(it.duration)}s · ${esc(it.resolution)} · ${esc(it.file_size_mb)} MB</div>
+        <video src="${esc(it.media_url)}" controls preload="metadata" style="width:100%; max-height:180px; border-radius:6px; background:#000;"></video>
+        <div style="display:flex; gap:6px;">
+          <a class="btn btn-sm" href="${esc(it.media_url)}" download style="text-decoration:none;">⬇ Baixar MP4</a>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--text-muted); font-size:12.5px;">Erro ao carregar compilados.</div>`;
+  }
+}
+
