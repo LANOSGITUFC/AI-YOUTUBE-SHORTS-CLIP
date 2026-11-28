@@ -1623,6 +1623,9 @@ def youtube_oauth_login(channel_name: str = "Canal Novo", db: Session = Depends(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+_GDRIVE_PKCE: Dict[str, Optional[str]] = {"verifier": None}
+
+
 @app.get("/api/auth/gdrive/login")
 def gdrive_oauth_login():
     """Conecta Google Drive via OAuth reutilizando o mesmo client_secret.json e Redirect URI do YouTube."""
@@ -1643,6 +1646,7 @@ def gdrive_oauth_login():
         prompt="consent",
         state="gdrive_archiver",
     )
+    _GDRIVE_PKCE["verifier"] = getattr(flow, "code_verifier", None)
     return RedirectResponse(auth_url)
 
 
@@ -1672,6 +1676,8 @@ def youtube_oauth_callback(code: str, state: Optional[str] = "Canal Novo", db: S
                 scopes=["https://www.googleapis.com/auth/drive.file"],
                 redirect_uri="http://localhost:8000/api/auth/youtube/callback",
             )
+            if _GDRIVE_PKCE.get("verifier"):
+                flow.code_verifier = _GDRIVE_PKCE["verifier"]
             flow.fetch_token(code=code)
             os.makedirs("./data/tokens", exist_ok=True)
             token_path = "./data/tokens/gdrive_token.json"
