@@ -115,8 +115,23 @@ class TestShortsClipPipeline(unittest.TestCase):
         dedup = DeduplicationEngine(self.db)
         scheduler = PostScheduler(self.db)
 
-        # Cria 3 clipes com status 'rendered' e arquivos MP4 válidos (> 4KB) + 1 arquivo vazio (0 bytes) que deve ser ignorado
-        created_files = []
+        # Cria 3 clipes com status 'rendered' e arquivos MP4 válidos (decodificáveis) + 1 arquivo vazio (0 bytes) que deve ser ignorado
+        import shutil
+        import subprocess
+        sample_mp4 = "./data/clips/_test_sched_sample.mp4"
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-i", "testsrc=size=320x568:duration=1.2",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                sample_mp4,
+            ],
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        created_files = [sample_mp4]
         for i in range(3):
             c = dedup.register_segment(
                 video_id="test_gta6_alanzoka",
@@ -126,8 +141,7 @@ class TestShortsClipPipeline(unittest.TestCase):
                 virality_score=85 + i
             )
             fake_mp4 = f"./data/clips/_test_sched_{i}.mp4"
-            with open(fake_mp4, "wb") as f:
-                f.write(b"\x00" * 8192)
+            shutil.copyfile(sample_mp4, fake_mp4)
             created_files.append(fake_mp4)
             c.clip_path = fake_mp4
             c.status = "rendered"
@@ -219,17 +233,20 @@ class TestShortsClipPipeline(unittest.TestCase):
             self.assertEqual(inbox[-1]["payload"]["msg"], "Hello Claude Code")
 
     def test_06_render_lock_and_ffprobe_validation(self):
-        """Testa lock exclusivo por clipe e rejeição de MP4 corrompido via ffprobe"""
+        """Testa lock exclusivo por clipe (RenderGuard) e rejeição de MP4 corrompido via ffprobe"""
         import shutil
         import subprocess
-        from app.services.editor import VideoEditor, get_clip_render_lock
+        from app.services.editor import VideoEditor
+        from app.services.render_guard import clip_render_lock, is_rendering, RenderBusyError
 
-        # 1. Mesmo clipe compartilha o mesmo lock; clipes diferentes têm locks distintos
-        lock_a1 = get_clip_render_lock(777)
-        lock_a2 = get_clip_render_lock(777)
-        lock_b = get_clip_render_lock(778)
-        self.assertIs(lock_a1, lock_a2)
-        self.assertIsNot(lock_a1, lock_b)
+        # 1. Lock exclusivo por clipe bloqueia concorrência no mesmo clipe sem bloquear outros
+        with clip_render_lock(777, wait=False):
+            self.assertTrue(is_rendering(777))
+            self.assertFalse(is_rendering(778))
+            with self.assertRaises(RenderBusyError):
+                with clip_render_lock(777, wait=False):
+                    pass
+        self.assertFalse(is_rendering(777))
 
         # 2. Arquivo > 4KB porém corrompido (bytes nulos) deve ser rejeitado pelo ffprobe
         if shutil.which("ffprobe"):

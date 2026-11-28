@@ -2222,10 +2222,10 @@ async function fillActiveExperimentSlots() {
     const res = await fetch(`/api/experiments/${activeExperimentId}/fill`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apply_variants: true, include_analyzed: false }),
+      body: JSON.stringify({ apply_variants: true, include_analyzed: true }),
     });
     const data = await res.json();
-    showToast(`${data.newly_assigned || 0} novo(s) clipe(s) alocado(s) (${data.filled_slots}/${data.total_slots}).`, 'success');
+    showToast(`${data.newly_assigned || 0} novo(s) clipe(s) alocado(s) (${data.filled_slots}/${data.total_slots}). O worker renderiza os pendentes automaticamente.`, 'success');
     await loadExperimentsView();
   } catch (e) {
     showToast('Erro ao preencher slots do experimento.', 'error');

@@ -64,12 +64,26 @@ class TestSevenDayExperiments(unittest.TestCase):
             self.db.add(vid)
             self.db.commit()
 
-        # Cria 4 clipes renderizados válidos (> 4KB) com durações diferentes
+        # Cria 4 clipes renderizados válidos (MP4 real decodificável pelo ffprobe) com durações diferentes
+        import shutil
+        import subprocess
+        sample_mp4 = os.path.join(self.tmp_dir.name, "_sample_valid.mp4")
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-i", "testsrc=size=320x568:duration=1.2",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                sample_mp4,
+            ],
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
         durations = [22.0, 35.0, 52.0, 26.0]
         for idx, dur in enumerate(durations):
             mp4_path = os.path.join(self.tmp_dir.name, f"lab_clip_{idx}.mp4")
-            with open(mp4_path, "wb") as f:
-                f.write(b"\x00" * 8192)
+            shutil.copyfile(sample_mp4, mp4_path)
             clip = ClipSegment(
                 video_id="LAB_TEST_VID_1",
                 start_time=10.0 + idx * 70,

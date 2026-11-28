@@ -547,7 +547,8 @@ class VideoEditor:
         rel_thumb_path = os.path.join(THUMBNAILS_DIR, f"thumb_{clip_id}.jpg")
         clip.clip_path = rel_clip_path
         clip.thumbnail_path = rel_thumb_path if os.path.exists(thumbnail_output_path) else None
-        clip.status = "rendered"
+        if clip.status not in ("scheduled", "published"):
+            clip.status = "rendered"
         self.db.commit()
 
         return {

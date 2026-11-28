@@ -261,17 +261,22 @@ class PipelineWorker:
                         self._log("error", f"Erro no vídeo {pending_video.id}: {e}")
                         logger.debug(traceback.format_exc())
 
-                # 3. Renderizar até 3 clipes analisados por ciclo (apenas com arquivo fonte existente em disco ou no Drive)
+                # 3. Renderizar até 3 clipes por ciclo (prioriza clipes já agendados no Lab 7 Dias sem MP4, depois analisados)
                 for _render_slot in range(3):
-                    analyzed_clips = (
+                    candidate_clips = (
                         db.query(ClipSegment)
-                        .filter(ClipSegment.status == "analyzed")
+                        .filter(ClipSegment.status.in_(["scheduled", "analyzed"]))
                         .order_by(ClipSegment.virality_score.desc())
                         .all()
                     )
                     renderable_clips = [
-                        c for c in analyzed_clips
-                        if c.video and (
+                        c for c in candidate_clips
+                        if (
+                            c.status == "analyzed"
+                            or (c.status == "scheduled" and (not c.clip_path or not os.path.isfile(c.clip_path)))
+                        )
+                        and c.video
+                        and (
                             (c.video.video_path and os.path.isfile(c.video.video_path))
                             or (c.video.id in archived_index)
                         )
@@ -294,12 +299,19 @@ class PipelineWorker:
 
                     def _clip_key(c):
                         ch_id = c.video.channel_id if c.video else str(c.video_id)
+                        needs_sched_render = 0 if c.status == "scheduled" else 1
                         has_local = 0 if (c.video and c.video.video_path and os.path.isfile(c.video.video_path)) else 1
-                        return (has_local,) + priority_key(weights, ch_id, rendered_counts.get(ch_id, 0)) + (-(c.virality_score or 0),)
+                        return (needs_sched_render, has_local) + priority_key(weights, ch_id, rendered_counts.get(ch_id, 0)) + (-(c.virality_score or 0),)
 
                     ranked = [c for c in renderable_clips if c.queue_rank is not None]
-                    # Fila manual (arrastada no painel) tem prioridade sobre a ordem automática
-                    pending_clip = min(ranked, key=lambda c: c.queue_rank) if ranked else min(renderable_clips, key=_clip_key)
+                    # Clipes já agendados no Lab 7 Dias têm prioridade máxima; depois fila manual; depois rank automático
+                    sched_needing_mp4 = [c for c in renderable_clips if c.status == "scheduled"]
+                    if sched_needing_mp4:
+                        pending_clip = min(sched_needing_mp4, key=_clip_key)
+                    elif ranked:
+                        pending_clip = min(ranked, key=lambda c: c.queue_rank)
+                    else:
+                        pending_clip = min(renderable_clips, key=_clip_key)
 
                     self._state["current_clip_id"] = pending_clip.id
                     try:
